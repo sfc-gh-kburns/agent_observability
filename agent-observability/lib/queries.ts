@@ -121,6 +121,43 @@ export const QUERIES: Record<string, QueryDef> = {
   },
   funnel: () => ({ sql: `SELECT * FROM ${M}.V_ADOPTION_FUNNEL_30D`, binds: [] }),
 
+  // ---------------- AI spend + Cortex Code (account-wide, not agent-filtered) ----------------
+  ai_spend_trend: (p) => ({
+    sql: `SELECT DAY, PRODUCT, SUM(CREDITS) AS CREDITS, SUM(REQUESTS) AS REQUESTS
+          FROM ${M}.V_AI_SPEND_DAILY WHERE DAY > DATEADD(day, -?, CURRENT_DATE())
+          GROUP BY 1, 2 ORDER BY 1`,
+    binds: [p.days],
+  }),
+  ai_spend_by_product: (p) => ({
+    sql: `SELECT PRODUCT,
+                 SUM(IFF(DAY > DATEADD(day, -?, CURRENT_DATE()), CREDITS, 0)) AS CREDITS,
+                 SUM(IFF(DAY > DATEADD(day, -?, CURRENT_DATE()), REQUESTS, 0)) AS REQUESTS,
+                 SUM(IFF(DAY <= DATEADD(day, -?, CURRENT_DATE()), CREDITS, 0)) AS PREV_CREDITS
+          FROM ${M}.V_AI_SPEND_DAILY WHERE DAY > DATEADD(day, -2 * ?, CURRENT_DATE())
+          GROUP BY 1 ORDER BY 2 DESC`,
+    binds: [p.days, p.days, p.days, p.days],
+  }),
+  code_by_surface: (p) => ({
+    sql: `SELECT SURFACE, SUM(REQUESTS) AS REQUESTS, SUM(THREADS) AS THREADS, COUNT(DISTINCT USER_ID) AS USERS,
+                 SUM(CREDITS) AS CREDITS, SUM(TOKENS) AS TOKENS, DIV0NULL(SUM(CREDITS), SUM(REQUESTS)) AS CREDITS_PER_REQUEST
+          FROM ${M}.V_CODE_USAGE_DAILY WHERE DAY > DATEADD(day, -?, CURRENT_DATE())
+          GROUP BY 1 ORDER BY 5 DESC`,
+    binds: [p.days],
+  }),
+  code_models: (p) => ({
+    sql: `SELECT MODEL, SUM(CREDITS) AS CREDITS, SUM(TOKENS) AS TOKENS, SUM(REQUESTS) AS REQUESTS
+          FROM ${M}.V_CODE_MODEL_DAILY WHERE DAY > DATEADD(day, -?, CURRENT_DATE())
+          GROUP BY 1 ORDER BY 2 DESC LIMIT 12`,
+    binds: [p.days],
+  }),
+  code_top_users: (p) => ({
+    sql: `SELECT USER_NAME, SUM(REQUESTS) AS REQUESTS, SUM(CREDITS) AS CREDITS,
+                 ARRAY_UNIQUE_AGG(SURFACE)::VARIANT AS SURFACES, MAX(DAY) AS LAST_ACTIVE
+          FROM ${M}.V_CODE_USAGE_DAILY WHERE DAY > DATEADD(day, -?, CURRENT_DATE())
+          GROUP BY 1 ORDER BY 3 DESC LIMIT 15`,
+    binds: [p.days],
+  }),
+
   // ---------------- Agent detail ----------------
   agent: (p) => ({
     sql: `SELECT AGENT_FQN, DISPLAY_NAME, OWNER, COMMENT, CREATED_ON, DEFAULT_VERSION_NAME, VERSION_COUNT, ORCHESTRATION_MODEL,

@@ -21,7 +21,9 @@ KPIs with deltas against the prior period:
 - Daily turns by interface (CoWork UI, Agent admin UI, external API, SQL function, eval, passthrough) and the interface mix.
 - A data freshness banner shows how current each source is.
 
-The **agent leaderboard** ranks every agent by turns, users, credits, credits per turn, success and SQL error rate. It flags idle agents, cost outliers (more than 2× the median credits per turn) and success-rate regressions.
+The **agent leaderboard** ranks every agent by turns, users, credits, credits per turn, success and SQL error rate. It flags idle agents, cost outliers (more than 2× the median credits per turn) and success-rate regressions. Turns that don't name an agent object appear as `(CoWork default agent)` or `(inline API agent)`.
+
+**AI spend by product** shows daily credits across Cortex Agents, CoWork, Cortex Code and AI SQL functions for the whole account. A **Cortex Code** section breaks CoCo usage down by surface (Desktop, Snowsight, CLI), model and user. CoCo runs on the agent runtime but owns no agent object, so it's kept out of the agent turn metrics and sourced from the CoCo usage views instead.
 
 <img src="docs/screenshots/leaderboard.png" width="600" alt="Agent leaderboard">
 
@@ -72,7 +74,7 @@ Pipeline and access: your role and content tier, data freshness for each source,
 ## Architecture
 
 ```
-SNOWFLAKE.ACCOUNT_USAGE  (Cortex Agent + CoWork usage, query history, users)  ─┐
+SNOWFLAKE.ACCOUNT_USAGE  (Cortex Agent + CoWork + Cortex Code usage, AI functions, query history, users)  ─┐
 SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS  (agent traces / spans)                ─┼─► RAW ─► CORE ─► MART ─► SAR app
 SHOW / DESCRIBE AGENTS, semantic views, Cortex Search services                 ─┘   (never   (dynamic   (views)   (caller's
                                                                                       purged)  tables)              rights)

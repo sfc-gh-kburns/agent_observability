@@ -27,7 +27,7 @@ export function PortfolioView() {
       <PageHeader
         eyebrow="Portfolio"
         title="Agent portfolio"
-        description="Every Cortex Agent and CoWork interaction across the account: adoption, cost, quality and latency."
+        description="Every Cortex Agent and CoWork interaction across the account, plus account-wide AI spend and Cortex Code usage."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <AgentFilter />
@@ -71,6 +71,9 @@ export function PortfolioView() {
         <ModelMix className="lg:col-span-2" />
         <Funnel />
       </section>
+
+      <AiSpend />
+      <CortexCode />
     </main>
   );
 }
@@ -173,7 +176,7 @@ function Leaderboard() {
           <TableBody>
             {rows.map((r) => {
               const fqn = String(r.AGENT_FQN);
-              const linkable = fqn !== '(no agent object)';
+              const linkable = !fqn.startsWith('(');   // "(CoWork default agent)" / "(inline API agent)" have no object
               return (
                 <TableRow key={fqn}>
                   <TableCell className="max-w-[16rem]">
@@ -182,8 +185,8 @@ function Leaderboard() {
                         {String(r.DISPLAY_NAME)}
                       </Link>
                     ) : (
-                      <span className="text-muted-foreground" title="Agentless agent:run calls (passthrough / inline-config API)">
-                        (no agent object)
+                      <span className="text-muted-foreground" title={NO_AGENT_HELP[fqn] ?? 'No agent object'}>
+                        {fqn}
                       </span>
                     )}
                   </TableCell>
@@ -266,5 +269,167 @@ function Funnel() {
         );
       }}
     </DataCard>
+  );
+}
+
+const NO_AGENT_HELP: Record<string, string> = {
+  '(CoWork default agent)': "CoWork chats that didn't pick an agent run on CoWork's built-in agent, which isn't a schema object",
+  '(inline API agent)': 'agent:run API calls that pass their config inline instead of naming an agent object',
+};
+
+/** Account-wide AI credits by product. Ignores the agent filter: CoCo and AI functions have no agent. */
+function AiSpend() {
+  const { days } = useFilters();
+  const trend = useQ('ai_spend_trend', { days });
+  const totals = useQ('ai_spend_by_product', { days });
+  return (
+    <section className="grid gap-4 lg:grid-cols-3">
+      <DataCard
+        title="AI spend by product"
+        description="Credits per day across Cortex Agents, CoWork, Cortex Code and AI functions (whole account)"
+        query={trend}
+        className="lg:col-span-2"
+      >
+        {(rows) => {
+          const { series, data } = pivot(rows, 'PRODUCT', 'CREDITS');
+          return (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data}>
+                  <CartesianGrid stroke={CHART_THEME.grid} vertical={false} />
+                  <XAxis dataKey="DAY" tick={CHART_THEME.tick} axisLine={false} tickLine={false} minTickGap={24} />
+                  <YAxis tick={CHART_THEME.tick} axisLine={false} tickLine={false} width={40} tickFormatter={formatTick} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  {series.map((s, i) => (
+                    <Bar key={s} dataKey={s} name={s} stackId="1" fill={CHART_COLORS[i % 5]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          );
+        }}
+      </DataCard>
+      <DataCard title="Credits by product" description={`Last ${days} days vs prior ${days}`} query={totals} contentClassName="p-0">
+        {(rows) => {
+          const total = rows.reduce((s, r) => s + (num(r.CREDITS) ?? 0), 0);
+          return (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead numeric>Credits</TableHead>
+                  <TableHead numeric>Share</TableHead>
+                  <TableHead numeric>vs prior</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow key={String(r.PRODUCT)}>
+                    <TableCell className="font-medium">{String(r.PRODUCT)}</TableCell>
+                    <TableCell numeric>{formatNumber(r.CREDITS, 2)}</TableCell>
+                    <TableCell numeric>{formatPercent(total ? (num(r.CREDITS) ?? 0) / total : null)}</TableCell>
+                    <TableCell numeric>
+                      <Delta cur={num(r.CREDITS)} prev={num(r.PREV_CREDITS)} invert />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          );
+        }}
+      </DataCard>
+    </section>
+  );
+}
+
+/** Cortex Code (CoCo) usage from the CoCo usage views. CoCo owns no agent object, so it isn't in the turn metrics above. */
+function CortexCode() {
+  const { days } = useFilters();
+  const surfaces = useQ('code_by_surface', { days });
+  const models = useQ('code_models', { days });
+  const users = useQ('code_top_users', { days });
+  return (
+    <section className="space-y-4">
+      <DataCard
+        title="Cortex Code"
+        description="Requests and credits by surface (Desktop, Snowsight, CLI). Not counted as agent turns."
+        query={surfaces}
+        contentClassName="p-0"
+      >
+        {(rows) => (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Surface</TableHead>
+                <TableHead numeric>Requests</TableHead>
+                <TableHead numeric>Threads</TableHead>
+                <TableHead numeric>Users</TableHead>
+                <TableHead numeric>Credits</TableHead>
+                <TableHead numeric>Credits/request</TableHead>
+                <TableHead numeric>Tokens</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={String(r.SURFACE)}>
+                  <TableCell className="font-medium">{String(r.SURFACE)}</TableCell>
+                  <TableCell numeric>{formatNumber(r.REQUESTS)}</TableCell>
+                  <TableCell numeric>{formatNumber(r.THREADS)}</TableCell>
+                  <TableCell numeric>{formatNumber(r.USERS)}</TableCell>
+                  <TableCell numeric>{formatNumber(r.CREDITS, 2)}</TableCell>
+                  <TableCell numeric>{formatNumber(r.CREDITS_PER_REQUEST, 4)}</TableCell>
+                  <TableCell numeric>{formatCompact(r.TOKENS)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </DataCard>
+      <section className="grid gap-4 lg:grid-cols-3">
+        <DataCard title="Cortex Code credits by model" description="From the per-model credit breakdown" query={models} className="lg:col-span-2">
+          {(rows) => {
+            const data = rows.map((r) => ({ name: String(r.MODEL), Credits: num(r.CREDITS) ?? 0 }));
+            return (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
+                    <CartesianGrid stroke={CHART_THEME.grid} horizontal={false} />
+                    <XAxis type="number" tick={CHART_THEME.tick} axisLine={false} tickLine={false} tickFormatter={formatTick} />
+                    <YAxis type="category" dataKey="name" tick={CHART_THEME.tick} axisLine={false} tickLine={false} width={150} />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Bar dataKey="Credits" fill={CHART_COLORS[2]} radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          }}
+        </DataCard>
+        <DataCard title="Top Cortex Code users" description="By credits" query={users} contentClassName="p-0">
+          {(rows) => (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead numeric>Requests</TableHead>
+                  <TableHead numeric>Credits</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow key={String(r.USER_NAME)}>
+                    <TableCell className="max-w-[10rem] truncate" title={arr(r.SURFACES).join(', ')}>
+                      {String(r.USER_NAME ?? '—')}
+                    </TableCell>
+                    <TableCell numeric>{formatNumber(r.REQUESTS)}</TableCell>
+                    <TableCell numeric>{formatNumber(r.CREDITS, 2)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DataCard>
+      </section>
+    </section>
   );
 }

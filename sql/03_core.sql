@@ -316,10 +316,18 @@ WITH info AS (
   LEFT JOIN (SELECT TRACE_ID, COUNT(*) AS TURNS_IN_TRACE FROM info WHERE TRACE_ID IS NOT NULL GROUP BY 1) tc ON tc.TRACE_ID = i.TRACE_ID
   LEFT JOIN spans sp ON sp.TRACE_ID = i.TRACE_ID AND tc.TURNS_IN_TRACE = 1
   LEFT JOIN mu       ON mu.REQUEST_ID = u.REQUEST_ID
+  -- Passthrough traces with no usage row are Cortex Code (CoCo) requests: they own no agent
+  -- object and are tracked from RAW.CODE_USAGE instead. CoWork's default agent also runs as
+  -- passthrough but is billed in usage, so it stays.
+  WHERE NOT (u.REQUEST_ID IS NULL AND i.RECORD_NAME = 'AgentPassthroughRequestResponseInfo')
 )
 SELECT j.*,
   IFF(j.AGENT_NAME IS NULL, NULL,
       '"' || j.AGENT_DATABASE_NAME || '"."' || j.AGENT_SCHEMA_NAME || '"."' || j.AGENT_NAME || '"') AS AGENT_FQN,
+  -- Stand-in key for turns without an agent object (parenthesised so it can't collide with an FQN)
+  IFF(j.AGENT_NAME IS NOT NULL, NULL,
+      CASE WHEN j.COWORK_NAME IS NOT NULL OR j.INTERFACE = 'cowork_ui' THEN '(CoWork default agent)'
+           ELSE '(inline API agent)' END) AS NO_AGENT_LABEL,
   ROW_NUMBER() OVER (PARTITION BY j.THREAD_ID ORDER BY j.START_TIME_UTC, j.TURN_ID) AS TURN_NUMBER,
   -- The assistant message produced by this turn is what the next turn replies to (and what feedback rates).
   LEAD(j.PARENT_MESSAGE_ID) OVER (PARTITION BY j.THREAD_ID ORDER BY j.START_TIME_UTC, j.TURN_ID) AS ASSISTANT_MESSAGE_ID,
@@ -427,6 +435,7 @@ WITH f AS (
 SELECT t.THREAD_ID, ANY_VALUE(t.THREAD_ID_SOURCE) AS THREAD_ID_SOURCE,
        MIN_BY(t.QUESTION, t.TURN_NUMBER) AS FIRST_QUESTION,                          -- content
        MIN_BY(t.AGENT_FQN, t.TURN_NUMBER) AS FIRST_AGENT_FQN,
+       MIN_BY(t.NO_AGENT_LABEL, t.TURN_NUMBER) AS NO_AGENT_LABEL,
        ARRAY_AGG(DISTINCT t.AGENT_FQN)          AS AGENT_FQNS,
        ARRAY_AGG(DISTINCT t.AGENT_VERSION_NAME) AS AGENT_VERSIONS,
        COUNT(DISTINCT t.AGENT_VERSION_NAME) > 1 AS IS_MULTI_VERSION,

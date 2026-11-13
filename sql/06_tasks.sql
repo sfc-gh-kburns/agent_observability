@@ -1,7 +1,7 @@
 -- =====================================================================
 -- 06_tasks.sql — orchestration
 -- One task graph so each cycle resumes the warehouse once:
---   T_AGENT_OBS_ROOT (schedule)                  events + usage + query history
+--   T_AGENT_OBS_ROOT (schedule)                  events + usage + CoCo/AI-function usage + query history
 --     └─ T_AGENT_OBS_CONFIG   (hourly-gated)     agent config SCD2
 --     └─ T_AGENT_OBS_DAILY    (daily-gated)      assets + users
 --          (finalizer) T_AGENT_OBS_REFRESH       refresh MART DTs (cascades through CORE)
@@ -76,12 +76,14 @@ CREATE OR REPLACE TASK ADMIN.T_AGENT_OBS_ROOT
   SCHEDULE = 'USING CRON 0 * * * * UTC'
   SUSPEND_TASK_AFTER_NUM_FAILURES = 5
   ALLOW_OVERLAPPING_EXECUTION = FALSE
-  COMMENT = 'AGENT_OBS: load events, usage, agent query history'
+  COMMENT = 'AGENT_OBS: load events, usage, CoCo + AI function usage, agent query history'
 AS
 EXECUTE IMMEDIATE $$
 BEGIN
   CALL AGENT_OBS.ADMIN.SP_LOAD_EVENTS();
   CALL AGENT_OBS.ADMIN.SP_LOAD_USAGE();
+  CALL AGENT_OBS.ADMIN.SP_LOAD_CODE_USAGE();
+  CALL AGENT_OBS.ADMIN.SP_LOAD_AI_FUNCTION_USAGE();
   CALL AGENT_OBS.ADMIN.SP_LOAD_QUERY_HISTORY();
 END;
 $$;
