@@ -1,0 +1,31 @@
+# Dependencies & build output
+node_modules/
+.next/
+out/
+output/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment & secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.key
+*.p12
+*.pfx
+connections.toml
+config.toml
+.snowflake/
+snowflake.log
+*.log
+
+# Local tooling / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+app.yml.builder
