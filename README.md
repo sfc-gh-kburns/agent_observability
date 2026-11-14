@@ -27,6 +27,18 @@ The **agent leaderboard** ranks every agent by turns, users, credits, credits pe
 
 <img src="docs/screenshots/leaderboard.png" width="600" alt="Agent leaderboard">
 
+### Conversation trends: what people ask
+Every distinct question is classified once with `AI_COMPLETE` (structured output). The classifier pulls out the real question, writes a generic canonical form, and assigns an intent, a business domain, metrics, dimensions and a time window. Canonical forms are embedded with `AI_EMBED`, and near-duplicates are grouped into **themes** per agent, so "revenue by category" and "what's our revenue per product category?" count as one theme.
+
+Each theme is joined to its outcomes: asks, people, active weeks, success, verified-query use, SQL errors, latency and feedback. The page flags themes that call for an action:
+- **Add verified queries**: frequent SQL answers that rarely use a verified query.
+- **Build reports**: metric questions that recur across weeks or from the same person.
+- **Fix gaps**: low success, SQL errors, negative feedback or problem reports.
+- **Help users**: "what can I ask?" and definition questions.
+- **Rising**: demand that doubled in the last 7 days.
+
+Opening a theme shows how people phrase it, links to example threads, and a **verified-query starter**: YAML built from the agent's latest successful SQL, ready to adapt. The page also charts intents and domains over time and lists the most requested metrics and dimensions. Question text and theme labels follow the content tier. The classifier model, theme similarity threshold and batch size are set in `ADMIN.CONFIG`; new questions are classified at the end of each pipeline run.
+
 ### Agent detail
 For a single agent:
 - Configuration chips: model, budget, tools, capabilities, owner and default version.
@@ -118,6 +130,7 @@ Content columns use masking policies keyed on `IS_ROLE_IN_SESSION('AGENT_OBS_CON
 | [`sql/05_policies.sql`](sql/05_policies.sql) | Content-tier masking policies |
 | [`sql/06_tasks.sql`](sql/06_tasks.sql) | Task graph and schedule |
 | [`sql/07_app_grants.sql`](sql/07_app_grants.sql) | Caller grants for the app |
+| [`sql/08_trends.sql`](sql/08_trends.sql) | Question classification (AI_COMPLETE), embeddings and theme grouping |
 | [`deploy.sh`](deploy.sh) | Runs the SQL in order |
 | [`agent-observability/`](agent-observability) | The SAR Next.js app (`lib/queries.ts` holds every named, bind-only query) |
 
@@ -147,6 +160,7 @@ Prerequisites: the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide
 ## Cost notes
 - The pipeline runs on serverless tasks twice a day. Loads are incremental, so steady-state cost is small.
 - The app's queries run on the query warehouse you configure, under each viewer's own role.
+- Question classification calls `AI_COMPLETE` and `AI_EMBED` once per *new distinct* question, so after the first backfill the cost tracks new questions only.
 - Mart storage grows with history by design. Prune `RAW` yourself if you need a retention limit.
 
 ## Security

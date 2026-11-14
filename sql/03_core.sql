@@ -288,6 +288,8 @@ WITH info AS (
     i.ATTRS:"snow.ai.observability.agent.tool_choice.type"::STRING           AS TOOL_CHOICE_TYPE,
     i.ATTRS:"snow.ai.observability.agent.first_message_in_thread"::STRING    AS FIRST_MESSAGE_IN_THREAD, -- content
     i.ATTRS:"ai.observability.record_root.input"::STRING                     AS QUESTION,               -- content
+    -- Stored unmasked (computed at refresh), so metadata-tier viewers can still join to question themes.
+    SHA2(i.ATTRS:"ai.observability.record_root.input"::STRING)               AS QUESTION_HASH,
     i.ATTRS:"snow.ai.observability.agent.response"::STRING                   AS RESPONSE,               -- content
     i.ATTRS:"snow.ai.observability.agent.thinking_response"::STRING          AS THINKING,               -- content
     TRY_PARSE_JSON(i.ATTRS:"snow.ai.observability.agent.suggested_queries"::STRING) AS SUGGESTED_QUERIES, -- content

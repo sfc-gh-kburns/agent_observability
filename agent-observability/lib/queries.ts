@@ -17,6 +17,8 @@ export type Params = {
   to: string | null;
   failed: boolean;
   limit: number;
+  /** Question theme id (Conversation trends drill-down). */
+  theme: string | null;
 };
 
 type Built = { sql: string; binds: (string | number | null)[] };
@@ -211,6 +213,136 @@ export const QUERIES: Record<string, QueryDef> = {
     binds: [p.agent],
   }),
 
+  // ---------------- Conversation trends ----------------
+  // Every trend query excludes system-generated and test prompts (IS_NOISE).
+  trend_themes: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `WITH t AS (
+              SELECT * FROM ${M}.V_QUESTION_TURN
+              WHERE START_TIME_UTC > DATEADD(day, -?, CURRENT_DATE()) AND NOT IS_NOISE AND THEME_ID IS NOT NULL ${a.clause}
+            ), per_user AS (
+              SELECT AGENT_KEY, THEME_ID, MAX(N) AS MAX_ASKS_ONE_USER
+              FROM (SELECT AGENT_KEY, THEME_ID, USER_ID, COUNT(*) N FROM t GROUP BY 1, 2, 3) GROUP BY 1, 2
+            ), weekly AS (
+              SELECT AGENT_KEY, THEME_ID, ARRAY_AGG(N) WITHIN GROUP (ORDER BY WK) AS SPARK
+              FROM (SELECT AGENT_KEY, THEME_ID, DATE_TRUNC('week', DAY) WK, COUNT(*) N FROM t GROUP BY 1, 2, 3) GROUP BY 1, 2
+            ), g AS (
+              SELECT AGENT_KEY, THEME_ID,
+                     ANY_VALUE(AGENT_DISPLAY_NAME) AS AGENT_DISPLAY_NAME,
+                     ANY_VALUE(THEME_LABEL) AS THEME_LABEL, ANY_VALUE(THEME_TOPIC) AS THEME_TOPIC,
+                     MODE(INTENT) AS INTENT, MODE(DOMAIN) AS DOMAIN,
+                     COUNT(*) AS ASKS, COUNT(DISTINCT QUESTION_HASH) AS PHRASINGS,
+                     COUNT(DISTINCT USER_ID) AS USERS, COUNT(DISTINCT THREAD_ID) AS THREADS,
+                     COUNT(DISTINCT DATE_TRUNC('week', DAY)) AS ACTIVE_WEEKS,
+                     MIN(START_TIME_UTC) AS FIRST_ASKED_UTC, MAX(START_TIME_UTC) AS LAST_ASKED_UTC,
+                     COUNT_IF(DAY > DATEADD(day, -7, CURRENT_DATE())) AS ASKS_LAST_7D,
+                     COUNT_IF(DAY <= DATEADD(day, -7, CURRENT_DATE()) AND DAY > DATEADD(day, -14, CURRENT_DATE())) AS ASKS_PRIOR_7D,
+                     DIV0NULL(COUNT_IF(IS_SUCCESS), COUNT(*)) AS SUCCESS_RATE,
+                     COUNT_IF(SQL_CALLS > 0) AS SQL_TURNS,
+                     DIV0NULL(COUNT_IF(VERIFIED_QUERY_HITS > 0), COUNT_IF(SQL_CALLS > 0)) AS VQ_HIT_RATE,
+                     DIV0NULL(SUM(SQL_ERRORS), SUM(SQL_CALLS)) AS SQL_ERROR_RATE,
+                     MEDIAN(DURATION_MS) AS P50_MS, SUM(COMBINED_CREDITS) AS CREDITS,
+                     SUM(FEEDBACK_POSITIVE) AS FEEDBACK_POSITIVE, SUM(FEEDBACK_NEGATIVE) AS FEEDBACK_NEGATIVE,
+                     ARRAY_UNIQUE_AGG(m.VALUE::STRING) AS METRICS
+              FROM t, LATERAL FLATTEN(INPUT => COALESCE(t.METRICS, ARRAY_CONSTRUCT(NULL)), OUTER => TRUE) m
+              GROUP BY 1, 2
+            )
+            SELECT g.* EXCLUDE (METRICS), g.METRICS::VARIANT AS METRICS, w.SPARK::VARIANT AS SPARK, u.MAX_ASKS_ONE_USER,
+                   -- Opportunity flags (thresholds documented in the page legend)
+                   (g.ASKS >= 3 AND g.SQL_TURNS >= 2 AND COALESCE(g.VQ_HIT_RATE, 0) < 0.5
+                    AND g.INTENT IN ('metric_lookup','breakdown','ranking','trend','comparison','list_records')) AS FLAG_VQR,
+                   (g.ASKS >= 3 AND (g.ACTIVE_WEEKS >= 2 OR u.MAX_ASKS_ONE_USER >= 3)
+                    AND g.INTENT IN ('metric_lookup','breakdown','ranking','trend','comparison','report_build')) AS FLAG_REPORT,
+                   (g.INTENT = 'problem_report'
+                    OR (g.ASKS >= 2 AND (g.SUCCESS_RATE < 0.8 OR COALESCE(g.SQL_ERROR_RATE, 0) > 0.25 OR g.FEEDBACK_NEGATIVE > 0))) AS FLAG_GAP,
+                   (g.ASKS >= 2 AND g.INTENT IN ('data_discovery','definition_help')) AS FLAG_ONBOARDING,
+                   (g.ASKS_LAST_7D >= 3 AND g.ASKS_LAST_7D >= 2 * g.ASKS_PRIOR_7D) AS FLAG_RISING,
+                   g.ASKS + 2 * g.USERS + 2 * g.ACTIVE_WEEKS AS PRIORITY
+            FROM g
+            LEFT JOIN weekly w ON w.AGENT_KEY = g.AGENT_KEY AND w.THEME_ID = g.THEME_ID
+            LEFT JOIN per_user u ON u.AGENT_KEY = g.AGENT_KEY AND u.THEME_ID = g.THEME_ID
+            ORDER BY PRIORITY DESC, ASKS DESC LIMIT 500`,
+      binds: [p.days, ...a.binds],
+    };
+  },
+  trend_summary: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `SELECT COUNT_IF(NOT IS_NOISE) AS QUESTIONS, COUNT_IF(IS_NOISE) AS NOISE,
+                   COUNT(DISTINCT IFF(NOT IS_NOISE, USER_ID, NULL)) AS ASKERS,
+                   COUNT(DISTINCT IFF(NOT IS_NOISE, AGENT_KEY || '|' || THEME_ID, NULL)) AS THEMES,
+                   COUNT_IF(INTENT = 'followup_refinement') AS FOLLOWUPS,
+                   DIV0NULL(COUNT_IF(NOT IS_NOISE AND IS_SUCCESS), COUNT_IF(NOT IS_NOISE)) AS SUCCESS_RATE,
+                   (SELECT QUESTIONS_CLASSIFIED FROM ${M}.V_QUESTION_ENRICHMENT_STATUS) AS CLASSIFIED,
+                   (SELECT MODEL FROM ${M}.V_QUESTION_ENRICHMENT_STATUS) AS MODEL,
+                   (SELECT LAST_CLASSIFIED_AT FROM ${M}.V_QUESTION_ENRICHMENT_STATUS) AS LAST_CLASSIFIED_AT
+            FROM ${M}.V_QUESTION_TURN WHERE START_TIME_UTC > DATEADD(day, -?, CURRENT_DATE()) ${a.clause}`,
+      binds: [p.days, ...a.binds],
+    };
+  },
+  trend_intents: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `SELECT INTENT, COUNT(*) AS ASKS, COUNT(DISTINCT USER_ID) AS USERS, DIV0NULL(COUNT_IF(IS_SUCCESS), COUNT(*)) AS SUCCESS_RATE
+            FROM ${M}.V_QUESTION_TURN WHERE START_TIME_UTC > DATEADD(day, -?, CURRENT_DATE()) AND NOT IS_NOISE ${a.clause}
+            GROUP BY 1 ORDER BY 2 DESC`,
+      binds: [p.days, ...a.binds],
+    };
+  },
+  trend_domains: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `SELECT DOMAIN, COUNT(*) AS ASKS FROM ${M}.V_QUESTION_TURN
+            WHERE START_TIME_UTC > DATEADD(day, -?, CURRENT_DATE()) AND NOT IS_NOISE ${a.clause}
+            GROUP BY 1 ORDER BY 2 DESC`,
+      binds: [p.days, ...a.binds],
+    };
+  },
+  trend_intent_weekly: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `SELECT DATE_TRUNC('week', DAY) AS DAY, INTENT, COUNT(*) AS ASKS FROM ${M}.V_QUESTION_TURN
+            WHERE START_TIME_UTC > DATEADD(day, -?, CURRENT_DATE()) AND NOT IS_NOISE ${a.clause}
+            GROUP BY 1, 2 ORDER BY 1`,
+      binds: [p.days, ...a.binds],
+    };
+  },
+  trend_terms: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `WITH t AS (SELECT * FROM ${M}.V_QUESTION_TURN
+                       WHERE START_TIME_UTC > DATEADD(day, -?, CURRENT_DATE()) AND NOT IS_NOISE ${a.clause})
+            SELECT KIND, TERM, COUNT(*) AS ASKS, COUNT(DISTINCT AGENT_KEY) AS AGENTS,
+                   DIV0NULL(COUNT_IF(VERIFIED_QUERY_HITS > 0), COUNT_IF(SQL_CALLS > 0)) AS VQ_HIT_RATE
+            FROM (SELECT 'metric' AS KIND, LOWER(TRIM(f.VALUE::STRING)) AS TERM, t.* FROM t, LATERAL FLATTEN(INPUT => t.METRICS) f
+                  UNION ALL
+                  SELECT 'dimension', LOWER(TRIM(f.VALUE::STRING)), t.* FROM t, LATERAL FLATTEN(INPUT => t.DIMENSIONS) f)
+            WHERE TERM <> ''
+            GROUP BY 1, 2 QUALIFY ROW_NUMBER() OVER (PARTITION BY KIND ORDER BY COUNT(*) DESC) <= 15
+            ORDER BY 1, 3 DESC`,
+      binds: [p.days, ...a.binds],
+    };
+  },
+  trend_theme_phrasings: (p) => ({
+    sql: `SELECT USER_QUESTION, COUNT(*) AS ASKS, COUNT(DISTINCT USER_ID) AS USERS, MAX(START_TIME_UTC) AS LAST_ASKED_UTC,
+                 DIV0NULL(COUNT_IF(IS_SUCCESS), COUNT(*)) AS SUCCESS_RATE, MAX_BY(THREAD_ID, START_TIME_UTC) AS LAST_THREAD_ID,
+                 ANY_VALUE(TIME_WINDOW) AS TIME_WINDOW
+          FROM ${M}.V_QUESTION_TURN
+          WHERE AGENT_KEY = ? AND THEME_ID = ? AND START_TIME_UTC > DATEADD(day, -?, CURRENT_DATE())
+          GROUP BY 1 ORDER BY 2 DESC, 4 DESC LIMIT 50`,
+    binds: [p.agent, p.theme, p.days],
+  }),
+  // Best SQL answer for a theme: latest successful execution, preferring ones that already used a verified query.
+  trend_theme_sql: (p) => ({
+    sql: `SELECT q.USER_QUESTION, q.THREAD_ID, q.START_TIME_UTC, s.SEMANTIC_MODEL, s.TOOL_NAME, s.VERIFIED_QUERY_USED, s.FINAL_SQL
+          FROM ${M}.V_QUESTION_TURN q
+          JOIN ${M}.V_SQL_EXECUTION s ON s.TRACE_ID = q.TRACE_ID   -- SQL spans carry the trace id, not the request id
+          WHERE q.AGENT_KEY = ? AND q.THEME_ID = ? AND q.IS_SUCCESS AND NOT q.IS_SHARED_TRACE AND NOT s.IS_ERROR AND s.FINAL_SQL IS NOT NULL
+          ORDER BY s.VERIFIED_QUERY_USED DESC, q.START_TIME_UTC DESC LIMIT 3`,
+    binds: [p.agent, p.theme],
+  }),
+
   // ---------------- Turns / threads / traces ----------------
   turns: (p) => {
     const a = optEq('AGENT_FQN', p.agent);
@@ -351,8 +483,11 @@ export function parseParams(sp: URLSearchParams): Params {
     to: str('to', 40),
     failed: sp.get('failed') === '1',
     limit: int('limit', 100, 1, 1000),
+    theme: str('theme', 64),
   };
 }
 
 /** Queries whose results include content-tier columns (audited when visible). */
-export const CONTENT_QUERIES = new Set(['thread_turns', 'trace_spans', 'trace_sql', 'thread_feedback']);
+export const CONTENT_QUERIES = new Set([
+  'thread_turns', 'trace_spans', 'trace_sql', 'thread_feedback', 'trend_theme_phrasings', 'trend_theme_sql',
+]);

@@ -4,7 +4,7 @@
 --   T_AGENT_OBS_ROOT (schedule)                  events + usage + CoCo/AI-function usage + query history
 --     └─ T_AGENT_OBS_CONFIG   (hourly-gated)     agent config SCD2
 --     └─ T_AGENT_OBS_DAILY    (daily-gated)      assets + users
---          (finalizer) T_AGENT_OBS_REFRESH       refresh MART DTs (cascades through CORE)
+--          (finalizer) T_AGENT_OBS_REFRESH       refresh MART DTs (cascades through CORE), then question trends
 -- All DTs use TARGET_LAG = DOWNSTREAM, so nothing refreshes on its own.
 -- Cadence is ADMIN.CONFIG 'PIPELINE_SCHEDULE' (applied by SP_SET_SCHEDULE).
 -- =====================================================================
@@ -109,10 +109,15 @@ $$;
 
 CREATE OR REPLACE TASK ADMIN.T_AGENT_OBS_REFRESH
   USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE = 'XSMALL'   -- DT refreshes themselves run on AGENT_OBS_WH
-  COMMENT = 'AGENT_OBS: refresh CORE/MART dynamic tables after loads'
+  COMMENT = 'AGENT_OBS: refresh CORE/MART dynamic tables after loads, then classify new questions'
   FINALIZE = ADMIN.T_AGENT_OBS_ROOT
 AS
+EXECUTE IMMEDIATE $$
+BEGIN
   CALL AGENT_OBS.ADMIN.SP_REFRESH_MART();
+  CALL AGENT_OBS.ADMIN.SP_REFRESH_TRENDS();   -- defined in 08_trends.sql
+END;
+$$;
 
 -- Apply cadence from config + (re)start the graph
 CREATE OR REPLACE PROCEDURE ADMIN.SP_SET_SCHEDULE(START_PIPELINE BOOLEAN)

@@ -9,6 +9,7 @@ export const LOGO_SRC = '/icon.svg';
  */
 export const NAV_ITEMS: { label: string; href: string }[] = [
   { label: 'Portfolio', href: '/' },
+  { label: 'Trends', href: '/trends' },
   { label: 'Threads', href: '/threads' },
   { label: 'Config', href: '/config' },
   { label: 'Assets', href: '/assets' },
