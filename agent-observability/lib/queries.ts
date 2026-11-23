@@ -19,6 +19,10 @@ export type Params = {
   limit: number;
   /** Question theme id (Conversation trends drill-down). */
   theme: string | null;
+  /** End user name (End users drill-down). */
+  user: string | null;
+  /** 'all' includes service/app and system accounts; default is people only. */
+  kind: string | null;
 };
 
 type Built = { sql: string; binds: (string | number | null)[] };
@@ -343,6 +347,175 @@ export const QUERIES: Record<string, QueryDef> = {
     binds: [p.agent, p.theme],
   }),
 
+  // ---------------- End users ----------------
+  // V_END_USER_TURN rows; `kind` = 'person' (default) hides service/app and system accounts.
+  eu_summary: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `WITH t AS (
+              SELECT *, IFF(DAY > DATEADD(day, -?, CURRENT_DATE()), 'cur', 'prev') AS PERIOD
+              FROM ${M}.V_END_USER_TURN
+              WHERE DAY > DATEADD(day, -2 * ?, CURRENT_DATE()) AND (? = 'all' OR ACCOUNT_KIND = 'person') ${a.clause}
+            )
+            SELECT PERIOD, COUNT(DISTINCT USER_NAME) AS USERS,
+                   COUNT(DISTINCT IFF(FIRST_SEEN_UTC > DATEADD(day, -?, CURRENT_DATE()), USER_NAME, NULL)) AS NEW_USERS,
+                   COUNT(*) AS TURNS, COUNT(DISTINCT THREAD_ID) AS THREADS, SUM(COMBINED_CREDITS) AS CREDITS,
+                   COUNT(ISSUE_REASON) AS ISSUES, COUNT(DISTINCT IFF(ISSUE_REASON IS NOT NULL, USER_NAME, NULL)) AS USERS_WITH_ISSUES,
+                   SUM(FEEDBACK_POSITIVE) AS FEEDBACK_POSITIVE, SUM(FEEDBACK_NEGATIVE) AS FEEDBACK_NEGATIVE,
+                   MEDIAN(DURATION_MS) AS P50_MS
+            FROM t GROUP BY 1`,
+      binds: [p.days, p.days, p.kind, ...a.binds, p.days],
+    };
+  },
+  eu_weekly: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `SELECT DATE_TRUNC('week', DAY) AS DAY,
+                   COUNT(DISTINCT IFF(DATE_TRUNC('week', FIRST_SEEN_UTC) = DATE_TRUNC('week', DAY), USER_NAME, NULL)) AS NEW_USERS,
+                   COUNT(DISTINCT IFF(DATE_TRUNC('week', FIRST_SEEN_UTC) < DATE_TRUNC('week', DAY), USER_NAME, NULL)) AS RETURNING_USERS,
+                   COUNT(*) AS TURNS, SUM(COMBINED_CREDITS) AS CREDITS, COUNT(ISSUE_REASON) AS ISSUES
+            FROM ${M}.V_END_USER_TURN
+            WHERE DAY > DATEADD(day, -?, CURRENT_DATE()) AND (? = 'all' OR ACCOUNT_KIND = 'person') ${a.clause}
+            GROUP BY 1 ORDER BY 1`,
+      binds: [p.days, p.kind, ...a.binds],
+    };
+  },
+  // One row per user with activity, cost, issues, feedback, favourite agent/theme and segment flags.
+  eu_users: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    const u = optEq('USER_NAME', p.user);
+    return {
+      sql: `WITH t AS (
+              SELECT * FROM ${M}.V_END_USER_TURN
+              WHERE DAY > DATEADD(day, -?, CURRENT_DATE()) AND (? = 'all' OR ACCOUNT_KIND = 'person') ${a.clause} ${u.clause}
+            ), top_agent AS (
+              SELECT USER_NAME, AGENT_DISPLAY_NAME AS TOP_AGENT, AGENT_KEY AS TOP_AGENT_KEY FROM t
+              GROUP BY 1, 2, 3 QUALIFY ROW_NUMBER() OVER (PARTITION BY USER_NAME ORDER BY COUNT(*) DESC) = 1
+            ), top_theme AS (
+              SELECT USER_NAME, THEME_LABEL AS TOP_THEME, INTENT AS TOP_THEME_INTENT, COUNT(*) AS TOP_THEME_ASKS FROM t
+              WHERE THEME_ID IS NOT NULL AND NOT IS_NOISE
+              GROUP BY 1, THEME_ID, 2, 3 QUALIFY ROW_NUMBER() OVER (PARTITION BY USER_NAME ORDER BY COUNT(*) DESC) = 1
+            ), weekly AS (
+              SELECT USER_NAME, ARRAY_AGG(N) WITHIN GROUP (ORDER BY WK) AS SPARK
+              FROM (SELECT USER_NAME, DATE_TRUNC('week', DAY) WK, COUNT(*) N FROM t GROUP BY 1, 2) GROUP BY 1
+            ), g AS (
+              SELECT USER_NAME, ANY_VALUE(USER_DISPLAY_NAME) AS DISPLAY_NAME, ANY_VALUE(ACCOUNT_KIND) AS ACCOUNT_KIND,
+                     ANY_VALUE(USER_TYPE) AS USER_TYPE, MIN(FIRST_SEEN_UTC) AS FIRST_SEEN_UTC,
+                     COUNT(*) AS TURNS, COUNT(DISTINCT THREAD_ID) AS THREADS, COUNT(DISTINCT DAY) AS ACTIVE_DAYS,
+                     COUNT(DISTINCT AGENT_KEY) AS AGENTS, COUNT(DISTINCT IFF(NOT IS_NOISE, THEME_ID, NULL)) AS THEMES,
+                     SUM(COMBINED_CREDITS) AS CREDITS, DIV0NULL(SUM(COMBINED_CREDITS), COUNT(*)) AS CREDITS_PER_TURN,
+                     COUNT(ISSUE_REASON) AS ISSUES, DIV0NULL(COUNT(ISSUE_REASON), COUNT(*)) AS ISSUE_RATE,
+                     SUM(FEEDBACK_POSITIVE) AS FEEDBACK_POSITIVE, SUM(FEEDBACK_NEGATIVE) AS FEEDBACK_NEGATIVE,
+                     MEDIAN(DURATION_MS) AS P50_MS, MAX(START_TIME_UTC) AS LAST_SEEN_UTC,
+                     DIV0NULL(COUNT_IF(INTENT IN ('data_discovery','definition_help')), COUNT(*)) AS DISCOVERY_SHARE
+              FROM t GROUP BY 1
+            )
+            SELECT g.*, ta.TOP_AGENT, ta.TOP_AGENT_KEY, tt.TOP_THEME, tt.TOP_THEME_INTENT, tt.TOP_THEME_ASKS, w.SPARK::VARIANT AS SPARK,
+                   (g.TURNS >= 20 AND g.ACTIVE_DAYS >= 5)                                      AS FLAG_POWER,
+                   (g.ISSUES >= 2 AND (g.ISSUE_RATE >= 0.2 OR g.FEEDBACK_NEGATIVE > 0))        AS FLAG_STRUGGLING,
+                   (g.FIRST_SEEN_UTC > DATEADD(day, -?, CURRENT_DATE()))                        AS FLAG_NEW,
+                   (g.LAST_SEEN_UTC < DATEADD(day, -14, CURRENT_DATE()))                        AS FLAG_DORMANT,
+                   (g.TURNS >= 3 AND g.DISCOVERY_SHARE >= 0.3)                                   AS FLAG_NEEDS_ONBOARDING
+            FROM g
+            LEFT JOIN top_agent ta ON ta.USER_NAME = g.USER_NAME
+            LEFT JOIN top_theme tt ON tt.USER_NAME = g.USER_NAME
+            LEFT JOIN weekly w ON w.USER_NAME = g.USER_NAME
+            ORDER BY g.TURNS DESC LIMIT 500`,
+      binds: [p.days, p.kind, ...a.binds, ...u.binds, p.days],
+    };
+  },
+  // Same person asking the same theme on several days: a personal dashboard or scheduled report would answer it.
+  eu_dashboard_opps: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    const u = optEq('USER_NAME', p.user);
+    return {
+      sql: `SELECT USER_NAME, AGENT_KEY, ANY_VALUE(AGENT_DISPLAY_NAME) AS AGENT_DISPLAY_NAME, THEME_ID,
+                   ANY_VALUE(THEME_LABEL) AS THEME_LABEL, MODE(INTENT) AS INTENT, MODE(DOMAIN) AS DOMAIN,
+                   COUNT(*) AS ASKS, COUNT(DISTINCT DAY) AS DAYS_ASKED, COUNT(DISTINCT DATE_TRUNC('week', DAY)) AS WEEKS_ASKED,
+                   SUM(COMBINED_CREDITS) AS CREDITS, MEDIAN(DURATION_MS) AS P50_MS,
+                   MIN(START_TIME_UTC) AS FIRST_ASKED_UTC, MAX(START_TIME_UTC) AS LAST_ASKED_UTC,
+                   MAX_BY(THREAD_ID, START_TIME_UTC) AS LAST_THREAD_ID
+            FROM ${M}.V_END_USER_TURN
+            WHERE DAY > DATEADD(day, -?, CURRENT_DATE()) AND (? = 'all' OR ACCOUNT_KIND = 'person') ${a.clause} ${u.clause}
+              AND THEME_ID IS NOT NULL AND NOT IS_NOISE
+              AND INTENT IN ('metric_lookup','breakdown','ranking','trend','comparison','list_records','report_build')
+            GROUP BY USER_NAME, AGENT_KEY, THEME_ID
+            HAVING COUNT(*) >= 3 AND COUNT(DISTINCT DAY) >= 2
+            ORDER BY DAYS_ASKED DESC, ASKS DESC LIMIT 100`,
+      binds: [p.days, p.kind, ...a.binds, ...u.binds],
+    };
+  },
+  eu_issue_reasons: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    return {
+      sql: `SELECT ISSUE_REASON, COUNT(*) AS TURNS, COUNT(DISTINCT USER_NAME) AS USERS
+            FROM ${M}.V_END_USER_TURN
+            WHERE DAY > DATEADD(day, -?, CURRENT_DATE()) AND (? = 'all' OR ACCOUNT_KIND = 'person') ${a.clause} AND ISSUE_REASON IS NOT NULL
+            GROUP BY 1 ORDER BY 2 DESC`,
+      binds: [p.days, p.kind, ...a.binds],
+    };
+  },
+  eu_issues: (p) => {
+    const a = optEq('AGENT_KEY', p.agent);
+    const u = optEq('USER_NAME', p.user);
+    return {
+      sql: `SELECT START_TIME_UTC, USER_NAME, AGENT_KEY, AGENT_DISPLAY_NAME, THREAD_ID, TURN_ID, ISSUE_REASON,
+                   COALESCE(USER_QUESTION, LEFT(QUESTION, 300)) AS QUESTION, THEME_LABEL, SQL_ERRORS, SQL_CALLS, STATUS_CODE
+            FROM ${M}.V_END_USER_TURN
+            WHERE DAY > DATEADD(day, -?, CURRENT_DATE()) AND (? = 'all' OR ACCOUNT_KIND = 'person') ${a.clause} ${u.clause}
+              AND ISSUE_REASON IS NOT NULL
+            ORDER BY START_TIME_UTC DESC LIMIT 100`,
+      binds: [p.days, p.kind, ...a.binds, ...u.binds],
+    };
+  },
+  eu_feedback: (p) => {
+    const a = optEq('COALESCE(t.AGENT_FQN, t.NO_AGENT_LABEL)', p.agent);
+    const u = optEq('f.USER_NAME', p.user);
+    return {
+      sql: `SELECT f.FEEDBACK_TS_UTC, f.USER_NAME, f.IS_POSITIVE, f.FEEDBACK_TEXT, f.THREAD_ID, f.TURN_ID,
+                   COALESCE(t.AGENT_DISPLAY_NAME, f.AGENT_NAME) AS AGENT_DISPLAY_NAME, LEFT(t.QUESTION, 300) AS QUESTION
+            FROM ${M}.V_FEEDBACK f LEFT JOIN ${M}.V_TURN t ON t.TURN_ID = f.TURN_ID
+            WHERE f.FEEDBACK_TS_UTC > DATEADD(day, -?, CURRENT_DATE()) ${a.clause} ${u.clause}
+            ORDER BY f.FEEDBACK_TS_UTC DESC LIMIT 100`,
+      binds: [p.days, ...a.binds, ...u.binds],
+    };
+  },
+  eu_user_agents: (p) => ({
+    sql: `SELECT AGENT_KEY, ANY_VALUE(AGENT_DISPLAY_NAME) AS AGENT_DISPLAY_NAME, COUNT(*) AS TURNS, COUNT(DISTINCT THREAD_ID) AS THREADS,
+                 SUM(COMBINED_CREDITS) AS CREDITS, COUNT(ISSUE_REASON) AS ISSUES, MAX(START_TIME_UTC) AS LAST_USED_UTC
+          FROM ${M}.V_END_USER_TURN WHERE USER_NAME = ? AND DAY > DATEADD(day, -?, CURRENT_DATE())
+          GROUP BY 1 ORDER BY 3 DESC`,
+    binds: [p.user, p.days],
+  }),
+  eu_user_themes: (p) => ({
+    sql: `SELECT AGENT_KEY, ANY_VALUE(AGENT_DISPLAY_NAME) AS AGENT_DISPLAY_NAME, THEME_ID, ANY_VALUE(THEME_LABEL) AS THEME_LABEL,
+                 MODE(INTENT) AS INTENT, MODE(DOMAIN) AS DOMAIN, COUNT(*) AS ASKS, COUNT(DISTINCT DAY) AS DAYS_ASKED,
+                 SUM(COMBINED_CREDITS) AS CREDITS, COUNT(ISSUE_REASON) AS ISSUES, MAX(START_TIME_UTC) AS LAST_ASKED_UTC
+          FROM ${M}.V_END_USER_TURN
+          WHERE USER_NAME = ? AND DAY > DATEADD(day, -?, CURRENT_DATE()) AND THEME_ID IS NOT NULL AND NOT IS_NOISE
+          GROUP BY AGENT_KEY, THEME_ID ORDER BY ASKS DESC LIMIT 50`,
+    binds: [p.user, p.days],
+  }),
+  eu_user_intents: (p) => ({
+    sql: `SELECT INTENT, COUNT(*) AS ASKS FROM ${M}.V_END_USER_TURN
+          WHERE USER_NAME = ? AND DAY > DATEADD(day, -?, CURRENT_DATE()) AND INTENT IS NOT NULL AND NOT IS_NOISE
+          GROUP BY 1 ORDER BY 2 DESC`,
+    binds: [p.user, p.days],
+  }),
+  eu_user_daily: (p) => ({
+    sql: `SELECT DAY, COUNT(*) AS TURNS, SUM(COMBINED_CREDITS) AS CREDITS, COUNT(ISSUE_REASON) AS ISSUES
+          FROM ${M}.V_END_USER_TURN WHERE USER_NAME = ? AND DAY > DATEADD(day, -?, CURRENT_DATE())
+          GROUP BY 1 ORDER BY 1`,
+    binds: [p.user, p.days],
+  }),
+  eu_user_turns: (p) => ({
+    sql: `SELECT START_TIME_UTC, AGENT_DISPLAY_NAME, AGENT_KEY, THREAD_ID, TURN_ID, COALESCE(USER_QUESTION, LEFT(QUESTION, 300)) AS QUESTION,
+                 INTENT, THEME_LABEL, COMBINED_CREDITS, DURATION_MS, ISSUE_REASON, FEEDBACK_POSITIVE, FEEDBACK_NEGATIVE
+          FROM ${M}.V_END_USER_TURN WHERE USER_NAME = ? AND DAY > DATEADD(day, -?, CURRENT_DATE())
+          ORDER BY START_TIME_UTC DESC LIMIT 50`,
+    binds: [p.user, p.days],
+  }),
+
   // ---------------- Turns / threads / traces ----------------
   turns: (p) => {
     const a = optEq('AGENT_FQN', p.agent);
@@ -484,10 +657,13 @@ export function parseParams(sp: URLSearchParams): Params {
     failed: sp.get('failed') === '1',
     limit: int('limit', 100, 1, 1000),
     theme: str('theme', 64),
+    user: str('user', 256),
+    kind: sp.get('kind') === 'all' ? 'all' : 'person',
   };
 }
 
 /** Queries whose results include content-tier columns (audited when visible). */
 export const CONTENT_QUERIES = new Set([
   'thread_turns', 'trace_spans', 'trace_sql', 'thread_feedback', 'trend_theme_phrasings', 'trend_theme_sql',
+  'eu_issues', 'eu_feedback', 'eu_user_turns',
 ]);

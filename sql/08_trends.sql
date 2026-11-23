@@ -247,3 +247,50 @@ CREATE OR REPLACE VIEW MART.V_QUESTION_ENRICHMENT_STATUS AS
 SELECT COUNT(*) AS QUESTIONS_CLASSIFIED, MAX(_ENRICHED_AT) AS LAST_CLASSIFIED_AT,
        ANY_VALUE(MODEL) AS MODEL, ANY_VALUE(CLASSIFIER_VERSION) AS CLASSIFIER_VERSION
 FROM AGENT_OBS.RAW.QUESTION_ENRICHMENT;
+
+-- ---------------------------------------------------------------------
+-- End users: one row per turn with user profile, theme and issue signals
+-- (backs the End users page). An "issue" is any turn with an SQL error, a
+-- non-success status, negative feedback or a problem-report question.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE VIEW MART.V_END_USER_TURN COMMENT = 'Turn-level end-user activity with theme and issue signals' AS
+WITH fb AS (
+  SELECT TURN_ID, COUNT_IF(IS_POSITIVE) AS FEEDBACK_POSITIVE, COUNT_IF(NOT IS_POSITIVE) AS FEEDBACK_NEGATIVE
+  FROM AGENT_OBS.CORE.FACT_FEEDBACK WHERE TURN_ID IS NOT NULL GROUP BY 1
+), first_seen AS (
+  SELECT USER_NAME, MIN(START_TIME_UTC) AS FIRST_SEEN_UTC FROM AGENT_OBS.CORE.FACT_TURN WHERE USER_NAME IS NOT NULL GROUP BY 1
+)
+SELECT t.TURN_ID, t.REQUEST_ID, t.TRACE_ID, t.THREAD_ID, t.START_TIME_UTC, TO_DATE(t.START_TIME_UTC) AS DAY,
+       t.USER_ID, COALESCE(t.USER_NAME, u.USER_NAME, '(unknown)') AS USER_NAME,
+       u.DISPLAY_NAME AS USER_DISPLAY_NAME, u.USER_TYPE,
+       -- People vs apps/service principals vs Snowflake system processes. Apps that call an agent
+       -- on behalf of their own end users show up as one service account.
+       CASE WHEN COALESCE(t.USER_NAME, u.USER_NAME) = 'SYSTEM' THEN 'system'
+            WHEN UPPER(COALESCE(u.USER_TYPE, '')) IN ('SERVICE', 'LEGACY_SERVICE', 'SNOWFLAKE_SERVICE')
+              OR COALESCE(t.USER_NAME, u.USER_NAME) LIKE 'SF$SERVICE$%'
+              OR COALESCE(t.USER_NAME, u.USER_NAME) LIKE 'MANAGED\\_SERVICE\\_%' ESCAPE '\\'
+              OR REGEXP_LIKE(COALESCE(t.USER_NAME, u.USER_NAME), '.*(_SVC|_SVC_USER|_SERVICE|_APP|_API)$') THEN 'service'
+            ELSE 'person' END AS ACCOUNT_KIND,
+       CASE WHEN COALESCE(t.USER_NAME, u.USER_NAME) = 'SYSTEM' THEN TRUE
+            WHEN UPPER(COALESCE(u.USER_TYPE, '')) IN ('SERVICE', 'LEGACY_SERVICE', 'SNOWFLAKE_SERVICE')
+              OR COALESCE(t.USER_NAME, u.USER_NAME) LIKE 'SF$SERVICE$%'
+              OR COALESCE(t.USER_NAME, u.USER_NAME) LIKE 'MANAGED\\_SERVICE\\_%' ESCAPE '\\'
+              OR REGEXP_LIKE(COALESCE(t.USER_NAME, u.USER_NAME), '.*(_SVC|_SVC_USER|_SERVICE|_APP|_API)$') THEN TRUE
+            ELSE FALSE END AS IS_SERVICE_USER,
+       fs.FIRST_SEEN_UTC,
+       COALESCE(t.AGENT_FQN, t.NO_AGENT_LABEL) AS AGENT_KEY, t.AGENT_DISPLAY_NAME, t.INTERFACE,
+       t.QUESTION, q.USER_QUESTION, q.INTENT, q.DOMAIN, q.THEME_ID, q.THEME_LABEL, COALESCE(q.IS_NOISE, FALSE) AS IS_NOISE,
+       t.IS_SUCCESS, t.STATUS_CODE, t.SQL_CALLS, t.SQL_ERRORS, t.VERIFIED_QUERY_HITS, t.DURATION_MS,
+       t.COMBINED_CREDITS, t.TOKENS,
+       COALESCE(f.FEEDBACK_POSITIVE, 0) AS FEEDBACK_POSITIVE, COALESCE(f.FEEDBACK_NEGATIVE, 0) AS FEEDBACK_NEGATIVE,
+       CASE WHEN NOT t.IS_SUCCESS THEN 'Request failed'
+            WHEN COALESCE(f.FEEDBACK_NEGATIVE, 0) > 0 THEN 'Negative feedback'
+            WHEN t.SQL_ERRORS > 0 AND t.SQL_ERRORS = t.SQL_CALLS THEN 'All SQL attempts failed'
+            WHEN t.SQL_ERRORS > 0 THEN 'SQL error (recovered)'
+            WHEN q.INTENT = 'problem_report' THEN 'User reported a problem'
+       END AS ISSUE_REASON
+FROM AGENT_OBS.MART.V_TURN t
+LEFT JOIN AGENT_OBS.CORE.DIM_USER u ON u.USER_ID = t.USER_ID
+LEFT JOIN first_seen fs ON fs.USER_NAME = t.USER_NAME
+LEFT JOIN AGENT_OBS.MART.V_QUESTION_TURN q ON q.TURN_ID = t.TURN_ID
+LEFT JOIN fb f ON f.TURN_ID = t.TURN_ID;
