@@ -39,6 +39,16 @@ Each theme is joined to its outcomes: asks, people, active weeks, success, verif
 
 Opening a theme shows how people phrase it, links to example threads, and a **verified-query starter**: YAML built from the agent's latest successful SQL, ready to adapt. The page also charts intents and domains over time and lists the most requested metrics and dimensions. Question text and theme labels follow the content tier. The classifier model, theme similarity threshold and batch size are set in `ADMIN.CONFIG`; new questions are classified at the end of each pipeline run.
 
+### End users: who asks, what it costs, where they get stuck
+Starts with the headline numbers for people (toggle to include app and service accounts):
+- active, new and returning users; questions; credits; questions with issues; feedback; dashboard opportunities
+- users per week (new vs returning) and top users by credits
+- **segments**: power users, new users, struggling users (2+ issues and a 20%+ issue rate, or negative feedback), users who need onboarding (30%+ "what can I ask?" questions) and users who have gone quiet
+- **where users get stuck**: issue reasons (request failed, all SQL attempts failed, SQL error recovered, negative feedback, user-reported problem), plus recent issues and feedback
+- **dashboard opportunities**: the same person asking the same kind of metric question on several days, with the credits and wait time a saved dashboard would avoid
+
+Click any user for their profile: daily activity and credits, agents used, kinds of questions, themes they ask about, their own dashboard opportunities, issues, feedback and their latest questions (each linking to the full thread and trace). Accounts are classified as person, service/app or system from the user type and naming conventions.
+
 ### Agent detail
 For a single agent:
 - Configuration chips: model, budget, tools, capabilities, owner and default version.
