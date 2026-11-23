@@ -75,7 +75,7 @@ function Overview() {
       <PageHeader
         eyebrow="End users"
         title="End user insights"
-        description="Who uses your agents, what they ask, what it costs, where they get stuck and what to build for them. Click any user for their full profile."
+        description="Who uses your agents, what they ask, what it costs and where they get stuck. Click a user for their profile."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <KindToggle />
