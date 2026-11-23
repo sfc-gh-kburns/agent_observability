@@ -49,6 +49,19 @@ Starts with the headline numbers for people (toggle to include app and service a
 
 Click any user for their profile: daily activity and credits, agents used, kinds of questions, themes they ask about, their own dashboard opportunities, issues, feedback and their latest questions (each linking to the full thread and trace). Accounts are classified as person, service/app or system from the user type and naming conventions.
 
+### Automations: what users have scheduled
+Every scheduled automation in the account, from the tasks in users' personal `USER$<name>` databases:
+- **CoWork automations**: tasks in `USER$<name>.SNOWFLAKE_INTELLIGENCE` that call `SYSTEM$CORTEX_DATA_AGENT_RUN_V2`. The target agent and the prompt are parsed from the task definition.
+- **Cortex Code automations**: agent tasks in `USER$<name>.PUBLIC` named `COCO_ROUTINE_*`.
+- **Agent SDK automations**: other agent-run tasks in `USER$<name>.PUBLIC`.
+
+The overview shows active, paused and failing automations, runs per day, success rate and 30-day credits, broken down by owner and by target agent, plus recent failures. Each automation gets a **health** label: healthy, flaky, failing, auto-suspended, paused, never run or deleted. Open an automation to see its prompt (content tier), its schedule in plain English, the last error and its full run history. Each run links to the thread it produced.
+
+Runs come from `TASK_HISTORY` and task compute from `SERVERLESS_TASK_HISTORY`. A run's agent or Cortex Code credits are the usage rows with `trigger_type = 'automation'` for the same user (and agent) during the run. Snowflake keeps automation run history for only two months; the mart keeps it, including for deleted automations.
+
+### Docs: how it works, with the SQL to check it
+A built-in help page with a section for each page. Each section explains what the page shows, defines every metric and flag, and gives copy-and-run SQL against Snowflake's own metadata (`ACCOUNT_USAGE`, `SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS`, `SHOW`/`DESCRIBE`). Anyone with the right access can validate a number or explore further without the mart. Each section also shows the equivalent mart query, and `GET_LINEAGE` queries trace any mart view back to the Snowflake source it came from. The queries share one `SET days / agent / user_name` block, and the page has search, a core-only filter and copy buttons.
+
 ### Agent detail
 For a single agent:
 - Configuration chips: model, budget, tools, capabilities, owner and default version.
@@ -96,7 +109,7 @@ Pipeline and access: your role and content tier, data freshness for each source,
 ## Architecture
 
 ```
-SNOWFLAKE.ACCOUNT_USAGE  (Cortex Agent + CoWork + Cortex Code usage, AI functions, query history, users)  ─┐
+SNOWFLAKE.ACCOUNT_USAGE  (Cortex Agent + CoWork + Cortex Code usage, AI functions, query history, users, tasks)  ─┐
 SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS  (agent traces / spans)                ─┼─► RAW ─► CORE ─► MART ─► SAR app
 SHOW / DESCRIBE AGENTS, semantic views, Cortex Search services                 ─┘   (never   (dynamic   (views)   (caller's
                                                                                       purged)  tables)              rights)
@@ -141,8 +154,9 @@ Content columns use masking policies keyed on `IS_ROLE_IN_SESSION('AGENT_OBS_CON
 | [`sql/06_tasks.sql`](sql/06_tasks.sql) | Task graph and schedule |
 | [`sql/07_app_grants.sql`](sql/07_app_grants.sql) | Caller grants for the app |
 | [`sql/08_trends.sql`](sql/08_trends.sql) | Question classification (AI_COMPLETE), embeddings and theme grouping |
+| [`sql/09_automations.sql`](sql/09_automations.sql) | Automations loader and views (CoWork / Cortex Code / Agent SDK tasks, runs and cost) |
 | [`deploy.sh`](deploy.sh) | Runs the SQL in order |
-| [`agent-observability/`](agent-observability) | The SAR Next.js app (`lib/queries.ts` holds every named, bind-only query) |
+| [`agent-observability/`](agent-observability) | The SAR Next.js app (`lib/queries.ts` holds every named, bind-only query; `lib/docs.ts` holds the Docs page content and SQL) |
 
 ## Setup
 

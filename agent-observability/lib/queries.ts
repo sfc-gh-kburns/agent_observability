@@ -23,6 +23,8 @@ export type Params = {
   user: string | null;
   /** 'all' includes service/app and system accounts; default is people only. */
   kind: string | null;
+  /** Automation task id (Automations drill-down). */
+  task: string | null;
 };
 
 type Built = { sql: string; binds: (string | number | null)[] };
@@ -516,6 +518,58 @@ export const QUERIES: Record<string, QueryDef> = {
     binds: [p.user, p.days],
   }),
 
+  // ---------------- Automations (CoWork / CoCo / Agent SDK agent tasks in USER$ databases) ----------------
+  auto_list: (p) => {
+    const u = optEq('OWNER_USER', p.user);
+    return {
+      sql: `SELECT TASK_ID, KIND, OWNER_USER, TITLE, TASK_NAME, TASK_DATABASE, TASK_SCHEMA, STATE, SCHEDULE, TIMEZONE, TARGET_AGENT,
+                   CREATED, LAST_ALTERED, IS_DELETED, DELETED, LAST_SUSPENDED_REASON, RUNS, SUCCEEDED, FAILED, RUNS_30D, FAILED_30D,
+                   SUCCESS_RATE, P50_MS, TOTAL_CREDITS, TASK_CREDITS, AGENT_CREDITS, CODE_CREDITS, CREDITS_30D,
+                   FIRST_RUN, LAST_RUN, LAST_STATE, LAST_ERROR, LAST_FAILURE, LAST_THREAD_ID, HEALTH
+            FROM ${M}.V_AUTOMATION
+            WHERE (?::BOOLEAN OR NOT IS_DELETED) ${u.clause}
+            ORDER BY IS_DELETED, CASE HEALTH WHEN 'failing' THEN 0 WHEN 'auto_suspended' THEN 1 WHEN 'flaky' THEN 2 ELSE 3 END,
+                     LAST_RUN DESC NULLS LAST`,
+      binds: [p.failed ? 1 : 0, ...u.binds],
+    };
+  },
+  auto_daily: (p) => ({
+    sql: `SELECT DAY, KIND, COUNT_IF(IS_SUCCESS) AS SUCCEEDED, COUNT_IF(IS_FAILED) AS FAILED,
+                 COUNT_IF(NOT IS_SUCCESS AND NOT IS_FAILED) AS OTHER, SUM(TOTAL_CREDITS) AS CREDITS
+          FROM ${M}.V_AUTOMATION_RUN WHERE DAY > DATEADD(day, -?, CURRENT_DATE())
+            AND (?::STRING IS NULL OR OWNER_USER = ?::STRING) AND (?::STRING IS NULL OR TASK_ID = ?::STRING)
+          GROUP BY 1, 2 ORDER BY 1`,
+    binds: [p.days, p.user, p.user, p.task, p.task],
+  }),
+  auto_owners: (p) => ({
+    sql: `SELECT OWNER_USER, COUNT(*) AS AUTOMATIONS, COUNT_IF(STATE = 'started') AS ACTIVE, COUNT_IF(KIND = 'COWORK') AS COWORK,
+                 COUNT_IF(KIND = 'COCO') AS COCO, COUNT_IF(KIND = 'AGENT_SDK') AS AGENT_SDK, SUM(RUNS_30D) AS RUNS_30D,
+                 SUM(FAILED_30D) AS FAILED_30D, SUM(CREDITS_30D) AS CREDITS_30D, MAX(LAST_RUN) AS LAST_RUN
+          FROM ${M}.V_AUTOMATION WHERE (?::BOOLEAN OR NOT IS_DELETED)
+          GROUP BY 1 ORDER BY 2 DESC`,
+    binds: [p.failed ? 1 : 0],
+  }),
+  auto_agents: () => ({
+    sql: `SELECT COALESCE(TARGET_AGENT, IFF(KIND = 'COCO', '(Cortex Code)', '(unknown)')) AS TARGET, COUNT(*) AS AUTOMATIONS,
+                 COUNT(DISTINCT OWNER_USER) AS OWNERS, SUM(RUNS_30D) AS RUNS_30D, SUM(CREDITS_30D) AS CREDITS_30D
+          FROM ${M}.V_AUTOMATION WHERE NOT IS_DELETED GROUP BY 1 ORDER BY 2 DESC`,
+    binds: [],
+  }),
+  auto_detail: (p) => ({
+    sql: `SELECT a.*, a.PROMPT AS PROMPT_TEXT FROM ${M}.V_AUTOMATION a WHERE TASK_ID = ?`,
+    binds: [p.task],
+  }),
+  auto_runs: (p) => ({
+    sql: `SELECT RUN_KEY, TASK_ID, TITLE, OWNER_USER, KIND, SCHEDULED_TIME, QUERY_START_TIME, COMPLETED_TIME, DURATION_MS, STATE,
+                 ERROR_CODE, ERROR_MESSAGE, QUERY_ID, SCHEDULED_FROM, ATTEMPT_NUMBER, TASK_CREDITS, AGENT_CREDITS, CODE_CREDITS,
+                 TOTAL_CREDITS, THREAD_ID
+          FROM ${M}.V_AUTOMATION_RUN
+          WHERE (?::STRING IS NULL OR TASK_ID = ?::STRING) AND (?::STRING IS NULL OR OWNER_USER = ?::STRING)
+            AND (?::BOOLEAN = FALSE OR IS_FAILED)
+          ORDER BY SCHEDULED_TIME DESC LIMIT ?`,
+    binds: [p.task, p.task, p.user, p.user, p.failed ? 1 : 0, p.limit],
+  }),
+
   // ---------------- Turns / threads / traces ----------------
   turns: (p) => {
     const a = optEq('AGENT_FQN', p.agent);
@@ -659,11 +713,12 @@ export function parseParams(sp: URLSearchParams): Params {
     theme: str('theme', 64),
     user: str('user', 256),
     kind: sp.get('kind') === 'all' ? 'all' : 'person',
+    task: str('task', 64),
   };
 }
 
 /** Queries whose results include content-tier columns (audited when visible). */
 export const CONTENT_QUERIES = new Set([
   'thread_turns', 'trace_spans', 'trace_sql', 'thread_feedback', 'trend_theme_phrasings', 'trend_theme_sql',
-  'eu_issues', 'eu_feedback', 'eu_user_turns',
+  'eu_issues', 'eu_feedback', 'eu_user_turns', 'auto_detail',
 ]);

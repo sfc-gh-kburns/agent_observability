@@ -3,12 +3,12 @@
 #   ./deploy.sh <snow-connection> [--backfill] [--start]
 # 00 runs as ACCOUNTADMIN; everything else as AGENT_OBS_INGEST_ROLE.
 # 05 must run after 03/04: CREATE OR REPLACE DYNAMIC TABLE drops masking policies.
-# 08 (trends) before 06 because the finalizer task calls SP_REFRESH_TRENDS.
+# 08/09 before 06 because the task graph calls SP_REFRESH_TRENDS and SP_LOAD_AUTOMATIONS.
 set -euo pipefail
 CONN="${1:?usage: ./deploy.sh <connection> [--backfill] [--start]}"; shift || true
 DIR="$(cd "$(dirname "$0")" && pwd)/sql"
 
-for f in 00_setup 01_raw 02_load_procs 03_core 04_mart 05_policies 08_trends 06_tasks; do
+for f in 00_setup 01_raw 02_load_procs 03_core 04_mart 05_policies 08_trends 09_automations 06_tasks; do
   echo "==> $f"
   snow sql -c "$CONN" -f "$DIR/$f.sql" >/dev/null
 done
@@ -23,6 +23,7 @@ for arg in "$@"; do
            CALL AGENT_OBS.ADMIN.SP_LOAD_AGENT_CONFIG(); CALL AGENT_OBS.ADMIN.SP_LOAD_ASSETS();
            CALL AGENT_OBS.ADMIN.SP_LOAD_USERS(); CALL AGENT_OBS.ADMIN.SP_LOAD_QUERY_HISTORY();
            CALL AGENT_OBS.ADMIN.SP_LOAD_CODE_USAGE(); CALL AGENT_OBS.ADMIN.SP_LOAD_AI_FUNCTION_USAGE();
+           CALL AGENT_OBS.ADMIN.SP_LOAD_AUTOMATIONS();
            CALL AGENT_OBS.ADMIN.SP_REFRESH_MART(TRUE); CALL AGENT_OBS.ADMIN.SP_REFRESH_TRENDS();" ;;
     --start)
       echo "==> start pipeline"

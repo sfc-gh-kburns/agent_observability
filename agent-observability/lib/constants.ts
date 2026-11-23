@@ -5,14 +5,16 @@ export const APP_TITLE = 'Agent Observability';
 export const LOGO_SRC = '/icon.svg';
 
 /**
- * Pages shown in the header nav and under "Go to" in the ⌘K command palette.
+ * Pages shown in the header nav.
  */
 export const NAV_ITEMS: { label: string; href: string }[] = [
   { label: 'Portfolio', href: '/' },
   { label: 'Trends', href: '/trends' },
   { label: 'End users', href: '/users' },
+  { label: 'Automations', href: '/automations' },
   { label: 'Threads', href: '/threads' },
   { label: 'Config', href: '/config' },
   { label: 'Assets', href: '/assets' },
   { label: 'Admin', href: '/admin' },
+  { label: 'Docs', href: '/docs' },
 ];

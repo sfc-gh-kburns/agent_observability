@@ -19,7 +19,7 @@ export function NavLinks() {
             key={n.href}
             href={days ? `${n.href}?days=${days}` : n.href}
             className={cn(
-              'rounded-md px-2.5 py-1.5 text-sm transition-colors',
+              'whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors lg:px-2.5 lg:text-sm',
               active ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >

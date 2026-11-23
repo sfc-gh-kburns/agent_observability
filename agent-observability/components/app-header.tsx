@@ -1,4 +1,3 @@
-import { CommandPalette } from '@/components/command-palette';
 import { NavLinks } from '@/components/nav-links';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { APP_TITLE, LOGO_SRC } from '@/lib/constants';
@@ -30,7 +29,6 @@ export function AppHeader() {
           <NavLinks />
         </Suspense>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <CommandPalette />
           <ThemeToggle />
         </div>
       </div>
