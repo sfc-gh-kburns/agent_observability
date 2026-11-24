@@ -1,12 +1,12 @@
 'use client';
 
+import { ErdExplorer } from '@/components/obs/erd';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DOC_SECTIONS, VARIABLES_SQL, type DocQuery } from '@/lib/docs';
-import { cn } from '@/lib/utils';
+import { DOC_SECTIONS, VARIABLES_SQL, type DocQuery, type DocSection } from '@/lib/docs';
 import { Check, ClipboardCopy } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
@@ -49,6 +49,71 @@ function QueryCard({ q }: { q: DocQuery }) {
   );
 }
 
+function TocLink({ id, title, count }: { id: string; title: string; count?: number }) {
+  return (
+    <a href={`#${id}`} className="flex items-center justify-between rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+      <span>{title}</span>
+      {count !== undefined && <span className="text-xs tabular-nums">{count}</span>}
+    </a>
+  );
+}
+
+function DataModel() {
+  return (
+    <section id="data-model" className="scroll-mt-20 space-y-4">
+      <div className="border-b pb-2">
+        <h2 className="text-xl font-semibold tracking-tight">Data model (ERD)</h2>
+      </div>
+      <div className="space-y-2 text-sm leading-relaxed">
+        <p>
+          Three diagrams: the Snowflake metadata this app is built on, the AGENT_OBS model the app queries, and how data flows
+          from one to the other. Boxes list the key columns (PK / FK) with their types; click a box for every column, its
+          relationships and a ready-made SELECT. Scroll to zoom, drag to pan, and use Full screen for the big picture.
+        </p>
+        <p className="text-muted-foreground">
+          Columns come from INFORMATION_SCHEMA and the data-flow arrows from SNOWFLAKE.CORE.GET_LINEAGE (see “Admin, pipeline &amp; lineage” below to run it yourself).
+        </p>
+      </div>
+      <ErdExplorer />
+    </section>
+  );
+}
+
+function DocSectionBlock({ s, after }: { s: DocSection; after?: ReactNode }) {
+  return (
+    <>
+      <section id={s.id} className="scroll-mt-20 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+          <h2 className="text-xl font-semibold tracking-tight">{s.title}</h2>
+          {s.queries.length > 0 && (
+            <CopyButton
+              label={`Copy all ${s.queries.length} queries`}
+              text={[VARIABLES_SQL, ...s.queries.map((q) => `-- ${q.title} (${q.source})\n-- ${q.description}\n${q.sql}`)].join('\n\n')}
+            />
+          )}
+        </div>
+        <div className="space-y-2 text-sm leading-relaxed">
+          {s.intro.map((p, i) => <p key={i}>{p}</p>)}
+        </div>
+        {s.definitions && s.definitions.length > 0 && (
+          <dl className="grid gap-x-4 gap-y-2 rounded-lg border bg-card p-4 text-sm sm:grid-cols-[12rem_1fr]">
+            {s.definitions.map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="font-medium">{k}</dt>
+                <dd className="text-muted-foreground">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <div className="space-y-3">
+          {s.queries.map((q) => <QueryCard key={q.id} q={q} />)}
+        </div>
+      </section>
+      {after}
+    </>
+  );
+}
+
 export function DocsView() {
   const [search, setSearch] = useState('');
   const [onlyCore, setOnlyCore] = useState(false);
@@ -86,10 +151,8 @@ export function DocsView() {
           <ul className="space-y-0.5 text-sm">
             {sections.map((s) => (
               <li key={s.id}>
-                <a href={`#${s.id}`} className="flex items-center justify-between rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">
-                  <span>{s.title}</span>
-                  <span className="text-xs tabular-nums">{s.queries.length}</span>
-                </a>
+                <TocLink id={s.id} title={s.title} count={s.queries.length} />
+                {s.id === 'getting-started' && !search && <TocLink id="data-model" title="Data model (ERD)" />}
               </li>
             ))}
           </ul>
@@ -109,33 +172,7 @@ export function DocsView() {
           </section>
 
           {sections.map((s) => (
-            <section key={s.id} id={s.id} className="scroll-mt-20 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
-                <h2 className="text-xl font-semibold tracking-tight">{s.title}</h2>
-                {s.queries.length > 0 && (
-                  <CopyButton
-                    label={`Copy all ${s.queries.length} queries`}
-                    text={[VARIABLES_SQL, ...s.queries.map((q) => `-- ${q.title} (${q.source})\n-- ${q.description}\n${q.sql}`)].join('\n\n')}
-                  />
-                )}
-              </div>
-              <div className="space-y-2 text-sm leading-relaxed">
-                {s.intro.map((p, i) => <p key={i}>{p}</p>)}
-              </div>
-              {s.definitions && s.definitions.length > 0 && (
-                <dl className="grid gap-x-4 gap-y-2 rounded-lg border bg-card p-4 text-sm sm:grid-cols-[12rem_1fr]">
-                  {s.definitions.map(([k, v]) => (
-                    <div key={k} className="contents">
-                      <dt className="font-medium">{k}</dt>
-                      <dd className="text-muted-foreground">{v}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-              <div className={cn('space-y-3')}>
-                {s.queries.map((q) => <QueryCard key={q.id} q={q} />)}
-              </div>
-            </section>
+            <DocSectionBlock key={s.id} s={s} after={s.id === 'getting-started' && !search ? <DataModel /> : null} />
           ))}
           {sections.length === 0 && <p className="text-sm text-muted-foreground">Nothing matches “{search}”.</p>}
         </div>

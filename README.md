@@ -62,6 +62,8 @@ Runs come from `TASK_HISTORY` and task compute from `SERVERLESS_TASK_HISTORY`. A
 ### Docs: how it works, with the SQL to check it
 A built-in help page with a section for each page. Each section explains what the page shows, defines every metric and flag, and gives copy-and-run SQL against Snowflake's own metadata (`ACCOUNT_USAGE`, `SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS`, `SHOW`/`DESCRIBE`). Anyone with the right access can validate a number or explore further without the mart. Each section also shows the equivalent mart query, and `GET_LINEAGE` queries trace any mart view back to the Snowflake source it came from. The queries share one `SET days / agent / user_name` block, and the page has search, a core-only filter and copy buttons.
 
+The **Data model (ERD)** section has three interactive diagrams: the Snowflake sources and how they join (REQUEST_ID, QUERY_ID, user and agent names), the AGENT_OBS facts and dimensions with their keys, and the full data flow from Snowflake through RAW, CORE and MART. Scroll to zoom, drag to pan, search for a table or column, and go full screen. Click a table to see all its columns and relationships, with a ready-made SELECT, or download a diagram as SVG. Columns come from `INFORMATION_SCHEMA` and data-flow arrows from `GET_LINEAGE`; tests check every key and join against them.
+
 ### Agent detail
 For a single agent:
 - Configuration chips: model, budget, tools, capabilities, owner and default version.
