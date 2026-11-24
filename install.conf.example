@@ -1,0 +1,48 @@
+# =====================================================================
+# Agent Observability — install settings
+# Copy to install.conf (gitignored) and edit, or let the CoCo install
+# wizard (.agents/skills/install-agent-observability) write it for you.
+# Values are plain shell assignments; quote anything with spaces.
+# =====================================================================
+
+# --- Connection & roles ----------------------------------------------
+# Snowflake CLI connection to install with (see: snow connection list).
+SNOW_CONNECTION=""
+# Role that creates roles, warehouses and account grants. Must be able to grant
+# account-level privileges and SNOWFLAKE database/application roles.
+ADMIN_ROLE="ACCOUNTADMIN"
+
+# --- Pipeline (the AGENT_OBS data mart) ------------------------------
+# Warehouse for loads and dynamic-table refreshes; created if it doesn't exist.
+PIPELINE_WAREHOUSE="AGENT_OBS_WH"
+PIPELINE_WAREHOUSE_SIZE="XSMALL"
+# How often the pipeline runs (a Snowflake task schedule). Every 12 hours costs
+# about 0.15-0.2 credits a day; hourly gives fresher data for a few times more.
+PIPELINE_SCHEDULE="USING CRON 0 */12 * * * UTC"
+# Earliest data read on the first load. Older data is usually already gone from
+# ACCOUNT_USAGE, so the default simply means "everything still available".
+BACKFILL_START="2020-01-01"
+# Model that classifies questions into intents and themes (Trends page).
+# Each distinct question is classified once.
+CLASSIFIER_MODEL="claude-haiku-4-5"
+# Optional price per credit, to show dollar amounts next to credits ("" = credits only).
+CREDIT_PRICE_USD=""
+
+# --- App (Snowflake App Runtime) -------------------------------------
+# Where the app is deployed; the database, schema and warehouse are created if missing.
+APP_DATABASE="AGENT_OBS_APPS"
+APP_SCHEMA="PUBLIC"
+APP_NAME="AGENT_OBSERVABILITY"
+APP_WAREHOUSE="AGENT_OBS_APP_WH"
+APP_WAREHOUSE_SIZE="XSMALL"
+# Role that deploys and owns the app.
+APP_OWNER_ROLE="ACCOUNTADMIN"
+# Stop the app after this many idle seconds (0 = never; the app keeps running and billing).
+APP_AUTO_SUSPEND_SECS="3600"
+
+# --- Who can use it --------------------------------------------------
+# Comma-separated roles that may open the app and see metrics (no conversation text).
+VIEWER_ROLES=""
+# Comma-separated roles that may also read questions, answers, SQL and feedback text.
+# Leave empty to keep conversation content hidden from everyone but the pipeline.
+CONTENT_ROLES=""

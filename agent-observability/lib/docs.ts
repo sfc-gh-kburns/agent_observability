@@ -726,7 +726,7 @@ ORDER BY calls DESC;`,
     id: 'admin',
     title: 'Admin, pipeline & lineage',
     intro: [
-      'Admin shows your role and content tier, data freshness for each source, and recent pipeline runs. The pipeline is a serverless task graph, AGENT_OBS.ADMIN.T_AGENT_OBS_ROOT, on cron 0 */12 * * * UTC. It loads each source incrementally, refreshes the dynamic tables, then classifies new questions.',
+      'Admin shows your role and content tier, data freshness for each source, and recent pipeline runs. The pipeline is a serverless task graph, AGENT_OBS.ADMIN.T_AGENT_OBS_ROOT, on the schedule chosen at install (PIPELINE_SCHEDULE in install.conf; every 12 hours by default). It loads each source incrementally, refreshes the dynamic tables, then classifies new questions.',
       'Snowflake lineage records how every mart object is built, so you can trace any view in the app back to the Snowflake source it came from.',
     ],
     queries: [

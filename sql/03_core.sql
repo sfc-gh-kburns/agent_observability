@@ -4,7 +4,7 @@
 -- usage LTZ is converted). Content columns are masked in 05_policies.sql.
 -- =====================================================================
 USE ROLE AGENT_OBS_INGEST_ROLE;
-USE WAREHOUSE AGENT_OBS_WH;
+USE WAREHOUSE <% pipeline_warehouse %>;
 USE SCHEMA AGENT_OBS.CORE;
 
 -- ---------------------------------------------------------------------
@@ -49,7 +49,7 @@ $$ NULLIF(REGEXP_SUBSTR(NAME,
 -- (evaluation runs carry run.id and are excluded; CoCo has no object.type)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.AGENT_TRACE
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = INCREMENTAL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = INCREMENTAL
 AS
 SELECT DISTINCT TRACE_ID
 FROM AGENT_OBS.RAW.AI_OBS_EVENTS
@@ -64,7 +64,7 @@ WHERE TRACE_ID IS NOT NULL
 -- (e.g. passthrough turns) are kept when their trace is an agent turn.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.EVENT_AGENT
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = INCREMENTAL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = INCREMENTAL
   COMMENT = 'Cortex Agent events (spans, request & feedback events) from RAW.AI_OBS_EVENTS'
 AS
 WITH ev AS (
@@ -112,7 +112,7 @@ FROM ev e;
 -- FACT_SPAN: one row per span with category + metadata extracted
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.FACT_SPAN
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = INCREMENTAL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = INCREMENTAL
   COMMENT = '1 row per agent span; ATTRS is the full attribute payload (content tier)'
 AS
 WITH s AS (
@@ -163,7 +163,7 @@ FROM s;
 -- TURN_SPAN_STATS: per-trace rollup of spans (incremental aggregate)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.TURN_SPAN_STATS
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = INCREMENTAL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = INCREMENTAL
 AS
 SELECT TRACE_ID,
        COUNT_IF(SPAN_CATEGORY = 'planning')                                    AS PLANNING_STEPS,
@@ -192,7 +192,7 @@ GROUP BY TRACE_ID;
 -- service type × model (4-level flatten of *_GRANULAR)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.FACT_TURN_MODEL_USAGE
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = INCREMENTAL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = INCREMENTAL
 AS
 WITH tok AS (
   SELECT u.REQUEST_ID, t1.index STEP_INDEX, t2.key SUB_REQUEST_ID,
@@ -227,7 +227,7 @@ LEFT JOIN cred c ON c.REQUEST_ID = t.REQUEST_ID AND c.STEP_INDEX = t.STEP_INDEX
 -- FACT_TURN: 1 row per turn = usage (authoritative cost) ⟗ trace summary
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.FACT_TURN
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = FULL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = FULL
   COMMENT = '1 row per agent turn. Cost from usage views; content & behavior from trace.'
 AS
 WITH info AS (
@@ -346,7 +346,7 @@ FROM j;
 -- FACT_SQL_EXECUTION
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.FACT_SQL_EXECUTION
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = INCREMENTAL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = INCREMENTAL
 AS
 SELECT
   s.EVENT_HASH, s.TRACE_ID, s.SPAN_ID, s.THREAD_ID, s.REQUEST_ID,
@@ -385,7 +385,7 @@ WHERE s.SPAN_CATEGORY = 'sql' OR s.SPAN_NAME = 'SqlExecution_CortexAnalyst';
 -- FACT_SEARCH_CALL
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.FACT_SEARCH_CALL
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = INCREMENTAL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = INCREMENTAL
 AS
 SELECT
   s.EVENT_HASH, s.TRACE_ID, s.SPAN_ID, s.THREAD_ID, s.REQUEST_ID,
@@ -406,7 +406,7 @@ WHERE s.SPAN_CATEGORY = 'search' AND s.RESOURCE_FQN IS NOT NULL;
 -- FACT_FEEDBACK (record_id = rated assistant message id)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.FACT_FEEDBACK
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = FULL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = FULL
 AS
 WITH fb AS (
   SELECT EVENT_HASH, END_TS_UTC AS FEEDBACK_TS_UTC, RECORD_ID AS RATED_MESSAGE_ID, THREAD_ID,
@@ -429,7 +429,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY fb.EVENT_HASH ORDER BY approx.START_TIME
 -- FACT_THREAD
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CORE.FACT_THREAD
-  TARGET_LAG = DOWNSTREAM WAREHOUSE = AGENT_OBS_WH REFRESH_MODE = FULL
+  TARGET_LAG = DOWNSTREAM WAREHOUSE = <% pipeline_warehouse %> REFRESH_MODE = FULL
 AS
 WITH f AS (
   SELECT TURN_ID, COUNT_IF(IS_POSITIVE) POS, COUNT_IF(NOT IS_POSITIVE) NEG FROM CORE.FACT_FEEDBACK GROUP BY 1

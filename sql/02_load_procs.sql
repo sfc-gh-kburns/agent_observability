@@ -3,7 +3,7 @@
 -- Each SP_LOAD_* returns a JSON summary and writes ADMIN.LOAD_LOG.
 -- =====================================================================
 USE ROLE AGENT_OBS_INGEST_ROLE;
-USE WAREHOUSE AGENT_OBS_WH;
+USE WAREHOUSE <% pipeline_warehouse %>;
 USE SCHEMA AGENT_OBS.ADMIN;
 
 -- Helper: config lookup ------------------------------------------------

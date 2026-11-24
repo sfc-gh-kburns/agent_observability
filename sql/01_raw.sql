@@ -4,7 +4,7 @@
 -- survives ACCOUNT_USAGE (1 yr) and event-table retention.
 -- =====================================================================
 USE ROLE AGENT_OBS_INGEST_ROLE;
-USE WAREHOUSE AGENT_OBS_WH;
+USE WAREHOUSE <% pipeline_warehouse %>;
 USE DATABASE AGENT_OBS;
 
 CREATE SCHEMA IF NOT EXISTS ADMIN COMMENT = 'Pipeline config, logs, procedures, tasks, policies';

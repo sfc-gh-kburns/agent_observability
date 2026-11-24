@@ -29,3 +29,6 @@ snowflake.log
 .idea/
 *.swp
 app.yml.builder
+
+# Local install settings (account-specific)
+install.conf

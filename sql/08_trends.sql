@@ -11,7 +11,7 @@
 -- Intent, domain, metrics and dimensions are generic metadata.
 -- =====================================================================
 USE ROLE AGENT_OBS_INGEST_ROLE;
-USE WAREHOUSE AGENT_OBS_WH;
+USE WAREHOUSE <% pipeline_warehouse %>;
 USE DATABASE AGENT_OBS;
 
 MERGE INTO ADMIN.CONFIG t USING (SELECT * FROM VALUES

@@ -126,7 +126,7 @@ SHOW / DESCRIBE AGENTS, semantic views, Cortex Search services                 �
 | `ADMIN` | Load procedures, the task graph and pipeline status. |
 
 ### Pipeline
-- `T_AGENT_OBS_ROOT` is a **serverless task graph** on cron `0 */12 * * * UTC`. It loads each source incrementally, then refreshes the mart.
+- `T_AGENT_OBS_ROOT` is a **serverless task graph** on the schedule you choose at install (`PIPELINE_SCHEDULE`, every 12 hours by default). It loads each source incrementally, then refreshes the mart.
 - `SP_SET_SCHEDULE(TRUE|FALSE)` starts or stops the pipeline.
 - The ingest role must be able to *see* every agent. `SP_GRANT_INGEST_VISIBILITY` grants MONITOR/USAGE. A guardrail stops the config loader from marking agents as dropped when it suddenly sees far fewer of them; this prevents false tombstones.
 
@@ -157,34 +157,52 @@ Content columns use masking policies keyed on `IS_ROLE_IN_SESSION('AGENT_OBS_CON
 | [`sql/07_app_grants.sql`](sql/07_app_grants.sql) | Caller grants for the app |
 | [`sql/08_trends.sql`](sql/08_trends.sql) | Question classification (AI_COMPLETE), embeddings and theme grouping |
 | [`sql/09_automations.sql`](sql/09_automations.sql) | Automations loader and views (CoWork / Cortex Code / Agent SDK tasks, runs and cost) |
-| [`deploy.sh`](deploy.sh) | Runs the SQL in order |
+| [`deploy.sh`](deploy.sh) | Installer: preflight, data mart, backfill, schedule, app (reads `install.conf`) |
+| [`install.conf.example`](install.conf.example) | Every install setting, documented; copy to `install.conf` |
+| [`.agents/skills/install-agent-observability`](.agents/skills/install-agent-observability/SKILL.md) | Cortex Code install wizard |
 | [`agent-observability/`](agent-observability) | The SAR Next.js app (`lib/queries.ts` holds every named, bind-only query; `lib/docs.ts` holds the Docs page content and SQL) |
 
 ## Setup
 
-Prerequisites: the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) (`snow`) with a connection that can use ACCOUNTADMIN, plus Node.js if you want to run the app locally.
+### With Cortex Code (recommended)
 
-1. **Deploy the mart, backfill history and start the 12-hour pipeline:**
-   ```bash
-   ./deploy.sh <connection> --backfill --start
-   ```
-   `00_setup.sql` runs as ACCOUNTADMIN; the other scripts run as `AGENT_OBS_INGEST_ROLE`. The script is idempotent.
-2. **Grant the app's caller grants:** run `sql/07_app_grants.sql`.
-3. **Grant viewers access:** give users `AGENT_OBS_APP_ROLE`, and add `AGENT_OBS_CONTENT_ROLE` for those who may read conversation content.
-4. **Deploy the app.** Set `database`, `schema` and `query_warehouse` in `agent-observability/app.yml` for your account, then run:
-   ```bash
-   cd agent-observability
-   snow app setup --app-name=agent_observability
-   snow app deploy
-   ```
-5. **Run locally (optional):**
-   ```bash
-   cd agent-observability && npm install
-   SNOWFLAKE_CONNECTION_NAME=<connection> npm run dev
-   ```
+Clone the repo, open it in Cortex Code (Desktop or CLI) and ask:
+
+> Install Agent Observability into my Snowflake account.
+
+The bundled **install wizard** ([`.agents/skills/install-agent-observability`](.agents/skills/install-agent-observability/SKILL.md)) does the rest:
+
+1. Checks the prerequisites: the Snowflake CLI with a connection, Node.js, an admin role, and Snowflake App Runtime enabled.
+2. Asks for every account-specific setting with sensible defaults, offering the warehouses and roles it finds in your account: connection, admin role, pipeline warehouse and schedule, classifier model, where to deploy the app and on which warehouse, app auto-suspend, and which roles may view the app or read conversation content.
+3. Shows a summary, and after you confirm writes `install.conf` and runs the installer step by step: data mart, backfill, schedule, app.
+4. Verifies data freshness and the pipeline state, and gives you the app URL.
+
+Run the same prompt again later to upgrade (after `git pull`), change settings or grant more roles. Asking it to uninstall shows what will be dropped first.
+
+### By hand
+
+```bash
+cp install.conf.example install.conf   # then edit: every setting is documented in the file
+./deploy.sh --all                      # = --check --mart --backfill --start --app
+```
+
+Each step can also be run on its own (`./deploy.sh --mart`, `--app`, …). All steps are idempotent, so re-running one after a failure is safe.
+
+- **`install.conf`** holds every account-specific value and is gitignored. Nothing account-specific is hard-coded in the repo.
+- **SQL scripts** read these values as Snowflake CLI template variables (`<% pipeline_warehouse %>`, …), so run them through `deploy.sh`.
+- **`agent-observability/app.yml`** is filled in from `install.conf` only for the duration of `--app`, then restored.
+- **Fixed names:** the AGENT_OBS database and its three roles (`AGENT_OBS_INGEST_ROLE`, `AGENT_OBS_APP_ROLE`, `AGENT_OBS_CONTENT_ROLE`) always use these names.
+
+To run the app locally against your own connection (optional):
+
+```bash
+cd agent-observability && npm install
+SNOWFLAKE_CONNECTION_NAME=<connection> npm run dev
+```
 
 ## Cost notes
-- The pipeline runs on serverless tasks twice a day. Loads are incremental, so steady-state cost is small.
+- The pipeline runs on serverless tasks on your chosen schedule. Loads are incremental: every 12 hours costs about 0.15–0.2 credits a day after the first backfill.
+- The app runs on Snowflake App Runtime compute while it's up. `APP_AUTO_SUSPEND_SECS` (default one hour idle) stops it when nobody is using it; `0` keeps it running all the time.
 - The app's queries run on the query warehouse you configure, under each viewer's own role.
 - Question classification calls `AI_COMPLETE` and `AI_EMBED` once per *new distinct* question, so after the first backfill the cost tracks new questions only.
 - Mart storage grows with history by design. Prune `RAW` yourself if you need a retention limit.

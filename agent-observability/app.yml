@@ -2,9 +2,12 @@
 version: 2
 
 name: AGENT_OBSERVABILITY
-database: SNOWFLAKE_APPS
+database: AGENT_OBS_APPS
 schema: PUBLIC
-query_warehouse: SNOWFLAKE_APPS_QUERY_WH
+query_warehouse: AGENT_OBS_APP_WH
+# name, database, schema, query_warehouse and auto_suspend_secs are set from
+# install.conf by ../deploy.sh --app at deploy time; these are the defaults.
+auto_suspend_secs: 3600
 
 label: "Agent Observability"
 description: "Cross-agent observability for Cortex Agents and Snowflake CoWork: usage, cost, quality, config and trace drill-down."

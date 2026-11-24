@@ -9,7 +9,7 @@
 -- only two months. Prompts and definitions are content (masked).
 -- =====================================================================
 USE ROLE AGENT_OBS_INGEST_ROLE;
-USE WAREHOUSE AGENT_OBS_WH;
+USE WAREHOUSE <% pipeline_warehouse %>;
 USE DATABASE AGENT_OBS;
 
 -- RAW.AUTOMATION_TASK / AUTOMATION_RUN / AUTOMATION_TASK_CREDITS are created in 01_raw.sql.

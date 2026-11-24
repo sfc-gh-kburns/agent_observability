@@ -27,10 +27,10 @@ Every query runs with **caller's rights** (`app/api/q/[name]/route.ts` → `with
 | `AGENT_OBS_APP_ROLE` | Metadata: counts, cost, latency, tool names, config |
 | `AGENT_OBS_CONTENT_ROLE` | Also questions, responses, SQL, search queries and results, and feedback text (each view is logged to `ADMIN.CONTENT_ACCESS_AUDIT`) |
 
-Required one-time grants are in `../sql/07_app_grants.sql`: caller grants on the owning role, plus warehouse usage. To let people open the app:
+Required grants are in `../sql/07_app_grants.sql` (caller grants on the owning role, plus warehouse usage); `../deploy.sh --app` applies them and grants the roles in `VIEWER_ROLES` / `CONTENT_ROLES`. To grant by hand:
 
 ```sql
-GRANT USAGE ON APPLICATION SERVICE SNOWFLAKE_APPS.PUBLIC.AGENT_OBSERVABILITY TO ROLE <role>;
+GRANT USAGE ON APPLICATION SERVICE <app_database>.<app_schema>.<app_name> TO ROLE <role>;
 GRANT ROLE AGENT_OBS_APP_ROLE TO ROLE <role>;        -- metadata tier
 -- GRANT ROLE AGENT_OBS_CONTENT_ROLE TO ROLE <role>; -- content tier (approved roles only)
 ```
@@ -48,11 +48,7 @@ Checks: `npm test` (route-free unit tests, including bind-count and injection gu
 
 ## Deploy
 
-`app.yml` (version 2) targets `SNOWFLAKE_APPS.PUBLIC.AGENT_OBSERVABILITY` on warehouse `SNOWFLAKE_APPS_QUERY_WH`.
-
-```bash
-snow app deploy --verbose
-```
+Deploy with `../deploy.sh --app`. It reads the app's database, schema, name, warehouse and auto-suspend from `../install.conf` and writes them into `app.yml` only for the duration of the deploy; the committed `app.yml` holds generic defaults.
 
 Pitfalls:
 

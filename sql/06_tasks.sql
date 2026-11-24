@@ -9,7 +9,7 @@
 -- Cadence is ADMIN.CONFIG 'PIPELINE_SCHEDULE' (applied by SP_SET_SCHEDULE).
 -- =====================================================================
 USE ROLE AGENT_OBS_INGEST_ROLE;
-USE WAREHOUSE AGENT_OBS_WH;
+USE WAREHOUSE <% pipeline_warehouse %>;
 USE SCHEMA AGENT_OBS.ADMIN;
 
 MERGE INTO ADMIN.CONFIG t USING (SELECT * FROM VALUES
@@ -109,7 +109,7 @@ END;
 $$;
 
 CREATE OR REPLACE TASK ADMIN.T_AGENT_OBS_REFRESH
-  USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE = 'XSMALL'   -- DT refreshes themselves run on AGENT_OBS_WH
+  USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE = 'XSMALL'   -- DT refreshes themselves run on <% pipeline_warehouse %>
   COMMENT = 'AGENT_OBS: refresh CORE/MART dynamic tables after loads, then classify new questions'
   FINALIZE = ADMIN.T_AGENT_OBS_ROOT
 AS

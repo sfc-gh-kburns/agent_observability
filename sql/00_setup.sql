@@ -1,8 +1,8 @@
 -- =====================================================================
 -- 00_setup.sql  —  roles, warehouse, database, account-level grants
--- Run as ACCOUNTADMIN. Idempotent.
+-- Run as the admin role from install.conf (default ACCOUNTADMIN). Idempotent.
 -- =====================================================================
-USE ROLE ACCOUNTADMIN;
+USE ROLE <% admin_role %>;
 
 -- Roles ---------------------------------------------------------------
 CREATE ROLE IF NOT EXISTS AGENT_OBS_INGEST_ROLE  COMMENT = 'Owns AGENT_OBS; runs ingestion tasks & dynamic tables';
@@ -23,11 +23,11 @@ SET setup_user = CURRENT_USER();
 GRANT ROLE AGENT_OBS_INGEST_ROLE TO USER IDENTIFIER($setup_user);
 
 -- Warehouse -----------------------------------------------------------
-CREATE WAREHOUSE IF NOT EXISTS AGENT_OBS_WH
-  WAREHOUSE_SIZE = XSMALL AUTO_SUSPEND = 60 AUTO_RESUME = TRUE INITIALLY_SUSPENDED = TRUE
+CREATE WAREHOUSE IF NOT EXISTS <% pipeline_warehouse %>
+  WAREHOUSE_SIZE = <% pipeline_warehouse_size %> AUTO_SUSPEND = 60 AUTO_RESUME = TRUE INITIALLY_SUSPENDED = TRUE
   COMMENT = 'AGENT_OBS ingestion + dynamic table refresh';
-GRANT USAGE, OPERATE, MONITOR ON WAREHOUSE AGENT_OBS_WH TO ROLE AGENT_OBS_INGEST_ROLE;
-GRANT USAGE ON WAREHOUSE AGENT_OBS_WH TO ROLE AGENT_OBS_APP_ROLE;
+GRANT USAGE, OPERATE, MONITOR ON WAREHOUSE <% pipeline_warehouse %> TO ROLE AGENT_OBS_INGEST_ROLE;
+GRANT USAGE ON WAREHOUSE <% pipeline_warehouse %> TO ROLE AGENT_OBS_APP_ROLE;
 
 -- Database (owned by ingest role) ------------------------------------
 CREATE DATABASE IF NOT EXISTS AGENT_OBS COMMENT = 'Agent Observability mart (RAW -> CORE -> MART)';
