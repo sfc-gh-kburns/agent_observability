@@ -1,15 +1,17 @@
 # Agent Observability for Snowflake Cortex Agents
 
-One place to see every **Cortex Agent** and **Snowflake CoWork** interaction in a Snowflake account. It covers adoption, cost, quality, latency and configuration drift, and you can drill into any thread to see its full span trace, much like Snowsight's agent monitoring but for all agents at once.
+One place to see every **Cortex Agent**, **Snowflake CoWork** and **Cortex Code** interaction in a Snowflake account. It covers adoption, cost, quality, latency, what people ask, who uses it, scheduled automations and configuration drift. You can drill into any thread to see its full span trace, much like Snowsight's agent monitoring but for all agents at once.
 
 It has two parts:
 
-1. **`AGENT_OBS` data mart.** A pipeline that copies agent usage, traces, configuration and asset metadata into history tables that are never purged. The source views lose rows as they age out; the mart keeps them.
+1. **`AGENT_OBS` data mart.** A pipeline that copies agent usage, traces, configuration, asset and automation metadata into history tables that are never purged. The source views lose rows as they age out; the mart keeps them.
 2. **A Snowflake App Runtime (Next.js) app.** The UI over the mart. Every query runs with **caller's rights**, so each viewer sees only what their own role allows.
+
+**Install it with Cortex Code:** clone the repo, open it in Cortex Code and ask *"Install Agent Observability into my Snowflake account."* A setup wizard asks for every setting and does the rest (see [Setup](#setup)).
 
 ![Portfolio](docs/screenshots/portfolio.png)
 
-> Customer agent names are blurred in these screenshots.
+> Customer names (agents, databases, service users and question themes) are blurred in these screenshots.
 
 ---
 
@@ -39,6 +41,8 @@ Each theme is joined to its outcomes: asks, people, active weeks, success, verif
 
 Opening a theme shows how people phrase it, links to example threads, and a **verified-query starter**: YAML built from the agent's latest successful SQL, ready to adapt. The page also charts intents and domains over time and lists the most requested metrics and dimensions. Question text and theme labels follow the content tier. The classifier model, theme similarity threshold and batch size are set in `ADMIN.CONFIG`; new questions are classified at the end of each pipeline run.
 
+<img src="docs/screenshots/trends.png" width="600" alt="Conversation trends: opportunities by theme">
+
 ### End users: who asks, what it costs, where they get stuck
 Starts with the headline numbers for people (toggle to include app and service accounts):
 - active, new and returning users; questions; credits; questions with issues; feedback; dashboard opportunities
@@ -48,6 +52,8 @@ Starts with the headline numbers for people (toggle to include app and service a
 - **dashboard opportunities**: the same person asking the same kind of metric question on several days, with the credits and wait time a saved dashboard would avoid
 
 Click any user for their profile: daily activity and credits, agents used, kinds of questions, themes they ask about, their own dashboard opportunities, issues, feedback and their latest questions (each linking to the full thread and trace). Accounts are classified as person, service/app or system from the user type and naming conventions.
+
+<img src="docs/screenshots/end-users.png" width="600" alt="End user insights">
 
 ### Automations: what users have scheduled
 Every scheduled automation in the account, from the tasks in users' personal `USER$<name>` databases:
@@ -59,10 +65,16 @@ The overview shows active, paused and failing automations, runs per day, success
 
 Runs come from `TASK_HISTORY` and task compute from `SERVERLESS_TASK_HISTORY`. A run's agent or Cortex Code credits are the usage rows with `trigger_type = 'automation'` for the same user (and agent) during the run. Snowflake keeps automation run history for only two months; the mart keeps it, including for deleted automations.
 
+<img src="docs/screenshots/automations.png" width="600" alt="Scheduled automations">
+
 ### Docs: how it works, with the SQL to check it
 A built-in help page with a section for each page. Each section explains what the page shows, defines every metric and flag, and gives copy-and-run SQL against Snowflake's own metadata (`ACCOUNT_USAGE`, `SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS`, `SHOW`/`DESCRIBE`). Anyone with the right access can validate a number or explore further without the mart. Each section also shows the equivalent mart query, and `GET_LINEAGE` queries trace any mart view back to the Snowflake source it came from. The queries share one `SET days / agent / user_name` block, and the page has search, a core-only filter and copy buttons.
 
+<img src="docs/screenshots/docs.png" width="600" alt="Docs: definitions and copy-ready SQL">
+
 The **Data model (ERD)** section has three interactive diagrams: the Snowflake sources and how they join (REQUEST_ID, QUERY_ID, user and agent names), the AGENT_OBS facts and dimensions with their keys, and the full data flow from Snowflake through RAW, CORE and MART. Scroll to zoom, drag to pan, search for a table or column, and go full screen. Click a table to see all its columns and relationships, with a ready-made SELECT, or download a diagram as SVG. Columns come from `INFORMATION_SCHEMA` and data-flow arrows from `GET_LINEAGE`; tests check every key and join against them.
+
+<img src="docs/screenshots/erd.png" width="600" alt="Data model ERD: Snowflake sources">
 
 ### Agent detail
 For a single agent:

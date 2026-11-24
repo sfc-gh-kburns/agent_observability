@@ -194,9 +194,9 @@ function RunsPerDay({ task }: { task?: string }) {
                 <YAxis tick={CHART_THEME.tick} axisLine={false} tickLine={false} width={32} allowDecimals={false} tickFormatter={formatTick} />
                 <Tooltip content={<ChartTooltip />} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Succeeded" stackId="r" fill={CHART_COLORS[2]} />
-                <Bar dataKey="Failed" stackId="r" fill={CHART_COLORS[3]} />
-                <Bar dataKey="Other" stackId="r" fill={CHART_COLORS[4]} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Succeeded" stackId="r" fill={CHART_COLORS[3]} />
+                <Bar dataKey="Failed" stackId="r" fill={CHART_COLORS[4]} />
+                <Bar dataKey="Other" stackId="r" fill="var(--muted-foreground)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
